@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     pk.add_argument("--top", type=int, default=25, help="how many films (default 25)")
     pk.add_argument("--min-votes", type=int, default=5000, help="IMDb votes a rating needs to count (default 5000)")
     pk.add_argument("--year", help="1940, or a range: 1920-1949")
+    pk.add_argument("--country", help="of origin, e.g. Japan, France, Sweden (Germany includes Weimar, East and "
+                    "West Germany; Russia the Soviet Union)")
     pk.add_argument("--copies", action="store_true", help="list every upload of each film, not only the best")
     pk.add_argument("--queue", action="store_true", help="queue the best copy of each film listed (never a doubtful one)")
     pk.add_argument("--any-rights", action="store_true", help="not only films Wikidata says are public domain in "
@@ -455,10 +457,16 @@ def cmd_picks(args, config) -> int:
     if not 1 <= args.top <= 500:
         raise ValueError("--top must be 1 to 500")
     years = _years(args.year) if args.year else None
-    films = picks.ranked(picks.Lists(log=print).films(refresh=args.refresh), min_votes=args.min_votes, years=years,
-                         any_rights=args.any_rights)
+    every = picks.Lists(log=print).films(refresh=args.refresh)
+    countries = picks.country_names(args.country, every) if args.country else None
+    films = picks.ranked(every, min_votes=args.min_votes, years=years, any_rights=args.any_rights, countries=countries)
+    if not args.any_rights:
+        others = len(picks.ranked(every, min_votes=args.min_votes, years=years, any_rights=True,
+                                  countries=countries)) - len(films)
+        if others:
+            print(f"({others:,} more rated films match but aren't known to be public domain; --any-rights shows them.)")
     if not films:
-        print("No rated films match.")
+        print("No rated films match" + ("" if args.min_votes <= 100 else "; try a lower --min-votes") + ".")
         return EXIT_OK
     archive = _archive(config)
     which = "rated films" if args.any_rights else "rated films in the US public domain (per Wikidata)"

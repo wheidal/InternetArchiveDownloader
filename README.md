@@ -39,6 +39,7 @@ iafetch queue add --search '"commodore 64" AND programming' --collection manuals
 iafetch queue add --search '"commodore 64" AND programming' --collection manuals_commodore --yes   # queue them
 iafetch picks --top 25                        # the best-rated public-domain films, each with its sharpest copy
 iafetch picks --year 1920-1929 --queue        # ... and queue them
+iafetch picks --country France --year 1895-1930   # by country of origin
 iafetch queue list
 iafetch get                                   # or: get --background, then iafetch status
 iafetch process <identifier>                  # file an item after reviewing its plan

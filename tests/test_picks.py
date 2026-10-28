@@ -21,13 +21,13 @@ def wikidata_rows(*rows):
 
 WIKIDATA = wikidata_rows(
     {"film": "http://www.wikidata.org/entity/Q1", "filmLabel": "His Girl Friday", "ia": "HisGirlFriday1940",
-     "imdb": "tt0032599", "year": 1940, "minutes": 92, "pd": 1},
+     "imdb": "tt0032599", "year": 1940, "minutes": 92, "pd": 1, "countries": "United States"},
     {"film": "http://www.wikidata.org/entity/Q1", "filmLabel": "His Girl Friday", "ia": "GirlFriday",
      "imdb": "tt0032599", "year": 1940, "minutes": 92},
     {"film": "http://www.wikidata.org/entity/Q1", "filmLabel": "His Girl Friday", "ia": "bad id with spaces",
      "imdb": "tt0032599", "year": 1940},
     {"film": "http://www.wikidata.org/entity/Q2", "filmLabel": "Charade", "ia": "Charade1963", "imdb": "tt0056923",
-     "year": 1963, "minutes": 5212},  # a duration in seconds, not minutes: ignored
+     "year": 1963, "minutes": 5212, "countries": "United States|United Kingdom"},  # 5212: seconds, ignored
     {"film": "http://www.wikidata.org/entity/Q3", "filmLabel": "Recent Film", "ia": "recent", "imdb": "tt9999999",
      "year": 2020, "minutes": 100},
 )
@@ -56,6 +56,7 @@ class ListsTest(unittest.TestCase):
             hgf = films["His Girl Friday"]
             self.assertEqual(hgf.uploads, ["HisGirlFriday1940", "GirlFriday"])  # the bad identifier is dropped
             self.assertEqual((hgf.year, hgf.minutes, hgf.rating, hgf.votes, hgf.public_domain), (1940, 92, 7.8, 70000, True))
+            self.assertEqual(films["Charade"].countries, ["United States", "United Kingdom"])
             self.assertIsNone(films["Charade"].minutes)
             self.assertFalse(films["Charade"].public_domain)
             Lists(Path(tmp) / "p.json", opener).films()  # cached: nothing fetched again
@@ -67,11 +68,23 @@ class ListsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             picks.fetch("https://example.org/x")
 
+    def test_countries(self):
+        films = [Film("Q1", "Tokyo Story", 1953, 136, "tt1", ["a"], False, ["Japan"], 8.1, 79000),
+                 Film("Q2", "Metropolis", 1927, 153, "tt2", ["b"], True, ["Weimar Republic"], 8.2, 200000),
+                 Film("Q3", "His Girl Friday", 1940, 92, "tt3", ["c"], True, ["United States"], 7.8, 70000)]
+        self.assertEqual(picks.country_names("Germany", films), {"weimar republic"})
+        self.assertEqual(picks.country_names("japan", films), {"japan"})
+        self.assertEqual([f.title for f in ranked(films, countries={"weimar republic"})], ["Metropolis"])
+        self.assertEqual([f.title for f in ranked(films, countries={"japan"})], [])  # not public domain
+        self.assertEqual([f.title for f in ranked(films, countries={"japan"}, any_rights=True)], ["Tokyo Story"])
+        with self.assertRaisesRegex(ValueError, "did you mean japan"):
+            picks.country_names("Japn", films)
+
     def test_ranking(self):
-        films = [Film("Q1", "A", 1940, 90, "tt1", ["a"], True, 7.8, 70000),
-                 Film("Q2", "B", 1963, 90, "tt2", ["b"], False, 7.9, 90000),
-                 Film("Q3", "C", 1930, 90, "tt3", ["c"], True, 8.5, 100),  # too few votes
-                 Film("Q4", "D", 1925, 90, "tt4", ["d"], True, 7.8, 90000)]
+        films = [Film("Q1", "A", 1940, 90, "tt1", ["a"], True, [], 7.8, 70000),
+                 Film("Q2", "B", 1963, 90, "tt2", ["b"], False, [], 7.9, 90000),
+                 Film("Q3", "C", 1930, 90, "tt3", ["c"], True, [], 8.5, 100),  # too few votes
+                 Film("Q4", "D", 1925, 90, "tt4", ["d"], True, [], 7.8, 90000)]
         self.assertEqual([f.title for f in ranked(films)], ["D", "A"])
         self.assertEqual([f.title for f in ranked(films, any_rights=True)], ["B", "D", "A"])
         self.assertEqual([f.title for f in ranked(films, years=(1930, 1950))], ["A"])
@@ -116,7 +129,7 @@ class CopiesTest(unittest.TestCase):
         fake.add("lent", [video("lent.mp4", 2_000_000_000, 1920, 1080, 5500)], title="His Girl Friday",
                  **{"access-restricted-item": "true"})
         archive = Archive(Client(1.0, 1.0, get=fake.get, opener=fake.open, sleep=lambda s: None))
-        film = Film("Q1", "His Girl Friday", 1940, 92, "tt", ["lent", "gone", "good"], True, 7.8, 70000)
+        film = Film("Q1", "His Girl Friday", 1940, 92, "tt", ["lent", "gone", "good"], True, [], 7.8, 70000)
         (got_film, copies), = best_copies([film], archive, top=1)
         self.assertEqual([c.identifier for c in copies], ["good"])
         self.assertEqual((copies[0].reviews, copies[0].stars), (3, 4.5))

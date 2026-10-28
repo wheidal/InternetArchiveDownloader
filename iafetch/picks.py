@@ -37,18 +37,20 @@ from .rights import RESTRICTED_QUERY, restriction
 WIKIDATA = "https://query.wikidata.org/sparql"
 IMDB_RATINGS = "https://datasets.imdbws.com/title.ratings.tsv.gz"
 WIKIDATA_TTL, IMDB_TTL = 30 * 24 * 3600, 7 * 24 * 3600
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 LOOKUP_BATCH = 100
 
 # film, short, silent, animated, TV film, documentary
 FILM_CLASSES = "wd:Q11424 wd:Q24862 wd:Q226730 wd:Q202866 wd:Q506240 wd:Q93204"
 # pd: Wikidata says the film is in the public domain in the United States (or without naming a country)
 QUERY = f"""SELECT ?film ?filmLabel ?ia ?imdb (MIN(YEAR(?date)) AS ?year) (MAX(?dur) AS ?minutes) (MAX(?pdus) AS ?pd)
+  (GROUP_CONCAT(DISTINCT ?countryName; separator="|") AS ?countries)
 WHERE {{
   VALUES ?class {{ {FILM_CLASSES} }}
   ?film wdt:P31 ?class; wdt:P724 ?ia; wdt:P345 ?imdb.
   OPTIONAL {{ ?film wdt:P577 ?date }}
   OPTIONAL {{ ?film wdt:P2047 ?dur }}
+  OPTIONAL {{ ?film wdt:P495 ?country. ?country rdfs:label ?countryName. FILTER(LANG(?countryName) = "en") }}
   OPTIONAL {{ ?film p:P6216 ?st. ?st ps:P6216 wd:Q19652. OPTIONAL {{ ?st pq:P1001 ?where }}
              FILTER(!BOUND(?where) || ?where = wd:Q30) BIND(1 AS ?pdus) }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul,de,fr,ru,it,es". }}
@@ -66,6 +68,7 @@ class Film:
     imdb: str
     uploads: list[str] = field(default_factory=list)
     public_domain: bool = False  # in the US, per Wikidata
+    countries: list[str] = field(default_factory=list)  # of origin, as Wikidata names them
     rating: float | None = None
     votes: int = 0
 
@@ -129,6 +132,9 @@ def wikidata_films(opener=fetch) -> list[Film]:
             film = films[qid] = Film(qid, value.get("filmLabel", qid), _int(value.get("year")),
                                      minutes if minutes and 1 <= minutes <= 400 else None, value["imdb"])
         film.public_domain = film.public_domain or value.get("pd") == "1"
+        for country in filter(None, value.get("countries", "").split("|")):
+            if country not in film.countries:
+                film.countries.append(country)
         if ID_RE.fullmatch(value["ia"]) and value["ia"] not in film.uploads:
             film.uploads.append(value["ia"])
     return [f for f in films.values() if f.uploads and f.imdb.startswith("tt")]
@@ -190,10 +196,38 @@ class Lists:
 
 # --- ranking and the best copy -----------------------------------------------------------------------------
 
+# A country also means the states it was before (or split into): "Germany" finds Weimar and East German films.
+COUNTRY_ALIASES = {
+    "germany": {"germany", "west germany", "east germany", "weimar republic", "nazi germany", "german empire"},
+    "russia": {"russia", "soviet union", "russian empire", "russian soviet federative socialist republic"},
+    "italy": {"italy", "kingdom of italy"},
+    "japan": {"japan", "empire of japan"},
+    "china": {"people's republic of china", "republic of china", "china", "hong kong", "british hong kong"},
+    "uk": {"united kingdom"}, "britain": {"united kingdom"}, "england": {"united kingdom"},
+    "us": {"united states"}, "usa": {"united states"}, "america": {"united states"},
+    "czech republic": {"czech republic", "czechoslovakia"}, "czechia": {"czech republic", "czechoslovakia"},
+}
+
+
+def country_names(wanted: str, films: list[Film]) -> set[str]:
+    """The country names (as Wikidata gives them) that `wanted` means. Raises ValueError, with suggestions, for
+    a country no film is from."""
+    key = wanted.strip().lower()
+    known = {c.lower() for f in films for c in f.countries}
+    names = COUNTRY_ALIASES.get(key, {key}) & known
+    if not names:
+        close = difflib.get_close_matches(key, sorted(known), n=4, cutoff=0.6)
+        raise ValueError(f"no film on archive.org is from {wanted!r} (per Wikidata)"
+                         + (f"; did you mean {', '.join(close)}?" if close else ""))
+    return names
+
+
 def ranked(films: list[Film], *, min_votes: int = 5000, years: tuple[int, int] | None = None,
-           any_rights: bool = False) -> list[Film]:
-    """Rated films, best first (ties: more votes first); only public-domain ones unless any_rights."""
+           any_rights: bool = False, countries: set[str] | None = None) -> list[Film]:
+    """Rated films, best first (ties: more votes first); only public-domain ones unless any_rights; only from
+    these countries (lowercase Wikidata names), if given."""
     keep = [f for f in films if f.rating is not None and f.votes >= min_votes and (any_rights or f.public_domain)
+            and (not countries or any(c.lower() in countries for c in f.countries))
             and (years is None or (f.year is not None and years[0] <= f.year <= years[1]))]
     return sorted(keep, key=lambda f: (-f.rating, -f.votes))
 
