@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.ruff_cache/
+
+# Downloads stay out of git
+*.part
+*.zip
+*.flac
+*.shn
+*.mp3
+*.mp4
+*.m4b
