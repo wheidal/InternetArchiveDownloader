@@ -157,6 +157,20 @@ class CliTest(unittest.TestCase):
         self.assertEqual(sorted(e.identifier for e in Queue().pending()), ["film", "gd77"])  # lent: refused
         self.assertIn("lent: not queued", out)
 
+    def test_items_queued_during_a_run_join_it(self):
+        self.run_cli("queue", "add", "film", "--as", "generic")
+        real = cli._get_one
+
+        def get_one(e, *a, **kw):
+            if e.identifier == "film":  # someone queues another item while this one downloads
+                Queue().add(cli.Entry("noyear", "Mystery", 1))
+            return real(e, *a, **kw)
+        self.fake.add("noyear", [file("noyear.mp4", fmt="MPEG4")], date="", title="Mystery", mediatype="data")
+        with mock.patch.object(cli, "_get_one", get_one):
+            code, out = self.run_cli("get")
+        self.assertIn("== noyear", out)
+        self.assertEqual(Queue().pending(), [])
+
     def test_a_removed_item_becomes_unavailable(self):
         self.run_cli("queue", "add", "film")
         del self.fake.items["film"]

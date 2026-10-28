@@ -336,7 +336,17 @@ def cmd_get(args, config) -> int:
     results: dict[str, list[str]] = {k: [] for k in (DONE, REVIEW, HANDED, UNAVAILABLE, FAILED)}
     used = 0
     try:
-        for n, e in enumerate(pending, 1):
+        tried: set[str] = set()
+        n = 0
+        while True:
+            if not pending and not args.limit:  # items queued while this ran join the end of it
+                pending = [x for x in queue.pending() if x.identifier not in tried]
+                progress.s["items"] += len(pending)
+            if not pending:
+                break
+            e = pending.pop(0)
+            tried.add(e.identifier)
+            n += 1
             if not queue.still_pending(e.identifier):
                 continue  # removed from the queue while this ran
             if budget is not None and used + e.size > budget and used:
