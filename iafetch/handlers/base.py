@@ -20,6 +20,8 @@ class Plan:
     source: str  # the downloaded folder, in the inbox
     dest: str  # the item's folder in the library
     moves: list[list[str]] = field(default_factory=list)  # [path in source, path in dest]
+    writes: dict[str, str] = field(default_factory=dict)  # path in dest -> text to write there (e.g. movie.nfo)
+    sidecar: str = "iafetch.json"  # path in dest of the item's record
     review: list[str] = field(default_factory=list)  # why it needs a person to look (empty: it doesn't)
     warnings: list[str] = field(default_factory=list)
     approved: bool = False
@@ -42,8 +44,13 @@ class Handler:
         """The library folder the item goes in (a key of Config.library)."""
         return "other"
 
-    def profile(self, item) -> Profile:
+    def profile(self, item, config=None) -> Profile:
         return Profile()
+
+    def narrow(self, item, selection, config=None):
+        """Pick from what the profile selected (e.g. one video of several versions). Not called when the user
+        named formats, which are taken as asked."""
+        return selection
 
     def plan(self, item, staged: Path, selection, config) -> Plan:
         raise NotImplementedError

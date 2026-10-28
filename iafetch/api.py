@@ -132,6 +132,8 @@ class Archive:
         if self.db:
             self.db.close()
 
+    __del__ = close
+
 
 def _first_page(query: str, rows: int, get, sort: str) -> list[dict]:
     """One page of advanced search: a listing to look at, not an enumeration (that's the scrape API's job)."""

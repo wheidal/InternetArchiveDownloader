@@ -3,7 +3,6 @@ the terms notice shown once."""
 
 import json
 import time
-from pathlib import Path
 
 from . import __version__
 
@@ -90,10 +89,8 @@ def sidecar(item, files: list[dict], processed: dict[str, str] | None = None, ha
     }
 
 
-def write_sidecar(folder: Path, record: dict) -> Path:
-    path = folder / SIDECAR
-    path.write_text(json.dumps(record, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    return path
+def dumps(record: dict) -> str:
+    return json.dumps(record, indent=1, ensure_ascii=False) + "\n"
 
 
 def _int(value) -> int | None:

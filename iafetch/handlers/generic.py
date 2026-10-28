@@ -45,9 +45,18 @@ def file_plan(plan: Plan, item, selection, config, handler: str) -> Path:
         src, target = safe_path(source, src_rel), safe_path(dest, dest_rel)
         if not src.is_file():
             continue
+        if target.exists():
+            raise ValueError(f"{target} is already there; not replacing it")
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(src, target)
-    rights.write_sidecar(dest, rights.sidecar(item, selection.files, handler=handler))
+    for rel, text in plan.writes.items():
+        target = safe_path(dest, rel)
+        if not target.exists():  # e.g. a series' tvshow.nfo, written by its first item
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+    side = safe_path(dest, plan.sidecar)
+    side.parent.mkdir(parents=True, exist_ok=True)
+    side.write_text(rights.dumps(rights.sidecar(item, selection.files, handler=handler)), encoding="utf-8")
     _remove_empty(source)
     return dest
 

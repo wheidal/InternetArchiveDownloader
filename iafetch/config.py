@@ -7,6 +7,7 @@ has its own folder, and so do the inbox and the archive of originals.
     root    = "/mnt/synology/InternetArchive"
     inbox   = "_Inbox"        # relative paths are inside root
     archive = "_Archive"
+    reserve = "20G"           # free space always left on the root's drive
 
     [net]
     rate = "4M"               # bandwidth cap, or "none"
@@ -65,6 +66,7 @@ class Config:
     library: dict[str, Path] = field(default_factory=dict)
     handlers: dict[str, str] = field(default_factory=lambda: dict(HANDLERS))
     acknowledged_terms: str = ""
+    settings: dict = field(default_factory=dict)  # per-handler sections, e.g. [video]
     reserve: int = 20 * 1024 ** 3  # R20: free space kept on the root's drive
     path: Path | None = None  # the file it came from
 
@@ -116,9 +118,24 @@ def parse_config(raw: dict, path: Path | None = None) -> Config:
     for kind in raw.get("library", {}):
         if kind not in LIBRARY:
             raise ConfigError(f"[library] {kind}: not a kind iafetch knows ({', '.join(LIBRARY)})")
+    try:
+        reserve = int(parse_rate(str(raw.get("reserve", "20G"))) or 0)
+    except ValueError as exc:
+        raise ConfigError(f"reserve: {exc}") from exc
     return Config(root, inbox, archive, _net(raw.get("net", {})), library,
                   {**HANDLERS, **{str(k): str(v) for k, v in raw.get("handlers", {}).items()}},
-                  str(raw.get("acknowledged_terms", "")), path=path)
+                  str(raw.get("acknowledged_terms", "")), _settings(raw), reserve, path=path)
+
+
+def _settings(raw: dict) -> dict:
+    video = dict(raw.get("video", {}))
+    quality = video.setdefault("quality", "h264")
+    if quality not in ("h264", "original", "smallest"):
+        raise ConfigError(f"[video] quality must be h264, original or smallest, not {quality!r}")
+    video.setdefault("subtitles", True)
+    video.setdefault("nfo", True)
+    return {**{k: v for k, v in raw.items() if isinstance(v, dict) and k not in ("net", "library", "handlers")},
+            "video": video}
 
 
 def _net(raw: dict) -> NetSettings:

@@ -44,14 +44,20 @@ class CliTest(unittest.TestCase):
         return code, out.getvalue()
 
     def test_show(self):
-        code, out = self.run_cli("show", "https://archive.org/details/film")
+        code, out = self.run_cli("show", "https://archive.org/details/film", "--as", "generic")
         self.assertEqual(code, 0)
         self.assertIn("license: public domain", out)
-        self.assertIn("handler: generic", out)
+        self.assertIn("handler: generic (chosen with --as)", out)
         self.assertRegex(out, r"\* film.mpeg")
         self.assertRegex(out, r"   film.mp4")
-        code, out = self.run_cli("show", "film", "--format", "h.264")
+        code, out = self.run_cli("show", "film", "--as", "generic", "--format", "h.264")
         self.assertRegex(out, r"\* film.mp4")
+
+    def test_show_a_film(self):
+        code, out = self.run_cli("show", "film")
+        self.assertIn("handler: video (mediatype movies)", out)
+        self.assertIn(f"filed as ({self.root / 'Movies' / 'A Film (1935)'})", out)
+        self.assertIn("A Film (1935).mp4", out)
 
     def test_restricted_items_are_refused(self):  # R14
         code, out = self.run_cli("show", "lent")
@@ -61,7 +67,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(Queue().pending(), [])
 
     def test_queue_get_and_file(self):
-        code, out = self.run_cli("queue", "add", "film", "--format", "h.264")
+        code, out = self.run_cli("queue", "add", "film", "--as", "generic", "--format", "h.264")
         self.assertEqual(code, 0, out)
         self.assertIn("queued film", out)
         code, out = self.run_cli("get")
@@ -109,6 +115,35 @@ class CliTest(unittest.TestCase):
             code, out = self.run_cli("get")
         self.assertEqual(code, 1)
         self.assertIn("info@archive.org", out)
+
+    def test_a_film_lands_in_movies(self):  # §6.7
+        self.run_cli("queue", "add", "film")
+        code, out = self.run_cli("get")
+        self.assertEqual(code, 0, out)
+        dest = self.root / "Movies" / "A Film (1935)"
+        self.assertEqual(sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()),
+                         [".iafetch/film/film_files.xml", ".iafetch/film/film_meta.xml", ".iafetch/film/iafetch.json",
+                          "A Film (1935).mp4", "movie.nfo", "poster.jpg"])
+        self.assertIn("<title>A Film</title>", (dest / "movie.nfo").read_text())
+
+    def test_a_film_without_a_year_waits_for_review(self):  # F19
+        self.fake.add("noyear", [file("noyear.mp4", fmt="MPEG4")], date="", title="Mystery")
+        self.run_cli("queue", "add", "noyear")
+        code, out = self.run_cli("get")
+        self.assertIn("NEEDS REVIEW (1)", out)
+        plan_path = self.root / "_Inbox" / "noyear.iafetch-plan.json"
+        plan = json.loads(plan_path.read_text())
+        self.assertFalse(plan["approved"])
+        self.assertTrue((self.root / "_Inbox" / "noyear" / "noyear.mp4").is_file())
+        plan["dest"] = str(self.root / "Movies" / "Mystery (1950)")
+        plan["moves"] = [[a, "Mystery (1950).mp4" if b == "Mystery.mp4" else b] for a, b in plan["moves"]]
+        plan["approved"] = True
+        plan_path.write_text(json.dumps(plan))
+        code, out = self.run_cli("process", str(plan_path))
+        self.assertEqual(code, 0, out)
+        self.assertTrue((self.root / "Movies" / "Mystery (1950)" / "Mystery (1950).mp4").is_file())
+        self.assertFalse(plan_path.exists())
+        self.assertEqual(Queue().get("noyear").status, "done")
 
     def test_a_removed_item_becomes_unavailable(self):
         self.run_cli("queue", "add", "film")

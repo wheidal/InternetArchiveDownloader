@@ -44,6 +44,12 @@ class Queue:
     def close(self) -> None:
         self.db.close()
 
+    def __del__(self):
+        try:
+            self.db.close()
+        except Exception:
+            pass
+
     def _entries(self, where: str = "", args: tuple = ()) -> list[Entry]:
         rows = self.db.execute(f"SELECT identifier, title, size, handler, options, status, added, error, result, id "
                                f"FROM queue {where} ORDER BY added, id", args).fetchall()

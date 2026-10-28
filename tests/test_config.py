@@ -14,6 +14,8 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(c.folder("movies"), c.root / "Movies")
         self.assertEqual(c.folder("no-such-kind"), c.root / "Other")
         self.assertEqual(c.handlers["GratefulDead"], "deadtag")
+        self.assertEqual(c.reserve, 20 * 1024 ** 3)
+        self.assertEqual(parse_config({"reserve": "5G"}).reserve, 5 * 1024 ** 3)
 
     def test_paths_outside_the_root_are_refused(self):  # R21
         for raw in ({"inbox": "/mnt/synology/Music/Inbox"}, {"archive": "../Elsewhere"},

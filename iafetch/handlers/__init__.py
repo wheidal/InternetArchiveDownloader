@@ -3,9 +3,10 @@ rule, then generic. Rules naming a handler that isn't built yet fall back to gen
 
 from .deadtag import Deadtag
 from .generic import Generic
+from .video import Video
 
-HANDLERS = {h.name: h for h in (Generic(), Deadtag())}
-MEDIATYPES: dict[str, str] = {}  # mediatype -> handler, as handlers are added
+HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video())}
+MEDIATYPES = {"movies": "video"}  # mediatype -> handler
 
 
 def choose(item, config, override: str = "") -> tuple[object, str]:
@@ -24,3 +25,17 @@ def choose(item, config, override: str = "") -> tuple[object, str]:
     if name:
         return HANDLERS[name], f"mediatype {item.mediatype}"
     return HANDLERS["generic"], "no other handler applies"
+
+
+def selection(handler, item, options: dict, config=None):
+    """The files to download: the handler's profile, adjusted by the command line's options, then narrowed
+    by the handler (unless formats were named: those are taken as asked)."""
+    from ..select import select
+    p = handler.profile(item, config)
+    if options.get("all"):
+        p.originals = False
+    p.formats = options.get("formats") or p.formats
+    p.globs = options.get("globs") or p.globs
+    p.exclude = p.exclude + options.get("exclude", [])
+    sel = select(item, p)
+    return sel if options.get("formats") else handler.narrow(item, sel, config)

@@ -15,13 +15,13 @@ from . import __version__, rights
 from .api import Archive, identifier_of
 from .config import ConfigError, acknowledge_terms, load_config
 from .download import DiskFull, download_item
-from .handlers import choose
+from .handlers import choose, selection
 from .handlers.base import Plan, PLAN_SUFFIX
 from .handlers.deadtag import HandOffError
 from .net import Client, Stopped
 from .progress import Progress, log_path, read_status, running
 from .queue import DONE, FAILED, HANDED, PENDING, REVIEW, UNAVAILABLE, Entry, Queue, data_dir
-from .select import Profile, junk, select, size_of
+from .select import junk, size_of
 
 EXIT_OK, EXIT_ERROR = 0, 1
 LARGE_BYTES, LARGE_ITEMS = 500 * 1024 ** 3, 10_000  # R19
@@ -104,16 +104,6 @@ def _options(args) -> dict:
                               ("all", args.all)) if v}
 
 
-def _profile(handler, item, options: dict) -> Profile:
-    p = handler.profile(item)
-    if options.get("all"):
-        p.originals = False
-    p.formats = options.get("formats") or p.formats
-    p.globs = options.get("globs") or p.globs
-    p.exclude = p.exclude + options.get("exclude", [])
-    return p
-
-
 def _archive(config, log=lambda line: None) -> Archive:
     client = Client(config.net.api_pause, config.net.download_pause, log=log)
     return Archive(client, data_dir() / "metadata.db")
@@ -154,7 +144,7 @@ def cmd_show(args, config) -> int:
     if not handler.downloads:
         print("\nQueued, this goes to deadfetch, which downloads and files it with deadtag.")
         return EXIT_OK
-    sel = select(item, _profile(handler, item, _options(args)))
+    sel = selection(handler, item, _options(args), config)
     chosen = {f["name"] for f in sel.files}
     print(f"\n  files ({len(item.files)} listed; * = would be downloaded):")
     for f in sorted(item.files, key=lambda f: f.get("name", "")):
@@ -172,7 +162,22 @@ def cmd_show(args, config) -> int:
         notes.append(f"{sel.encrypted} encrypted lending file(s) skipped")
     for n in notes:
         print(f"  {n}")
+    if sel.files and handler.name != "generic":
+        plan = handler.plan(item, config.inbox / identifier, sel, config)
+        moves = [m for m in plan.moves if not m[1].startswith(".iafetch/")]
+        print(f"\n  filed as ({plan.dest}):")
+        for _, rel in moves[:SHOW_MOVES]:
+            print(f"    {rel}")
+        if len(moves) > SHOW_MOVES:
+            print(f"    ... and {len(moves) - SHOW_MOVES} more")
+        for rel in plan.writes:
+            print(f"    {rel}")
+        for why in plan.review:
+            print(f"  needs review: {why}")
     return EXIT_OK
+
+
+SHOW_MOVES = 12
 
 
 # --- the queue ------------------------------------------------------------------------------------
@@ -226,7 +231,7 @@ def _queue_add(args, config, queue) -> int:
         if one_file:
             options["globs"] = [one_file]
         handler, _ = choose(item, config, args.handler)
-        size = select(item, _profile(handler, item, options)).size if handler.downloads else int(item.raw.get("item_size") or 0)
+        size = selection(handler, item, options, config).size if handler.downloads else int(item.raw.get("item_size") or 0)
         if queue.add(Entry(item.identifier, item.title, size, args.handler, options)):
             added += 1
             print(f"queued {identifier} ({_size(size)}, {handler.name}; {rights.license_text(item)})")
@@ -322,7 +327,7 @@ def _get_one(e: Entry, config, archive, inbox: Path, throttle, progress, no_proc
             return HANDED, f"queued with deadfetch: {handler.hand_off(e.identifier)}", 0
         except HandOffError as exc:
             return FAILED, str(exc), 0
-    sel = select(item, _profile(handler, item, e.options))
+    sel = selection(handler, item, e.options, config)
     if not sel.files:
         return FAILED, "nothing to download with this selection (see iafetch show)", 0
     say(f"   {item.title}; {rights.license_text(item)}")
@@ -378,7 +383,7 @@ def cmd_process(args, config) -> int:
         handler, _ = choose(item, config, (Queue().get(identifier) or Entry(identifier)).handler)
         plan = None
     entry = Queue().get(item.identifier)
-    sel = select(item, _profile(handler, item, entry.options if entry else {}))
+    sel = selection(handler, item, entry.options if entry else {}, config)
     plan = plan or handler.plan(item, inbox / item.identifier, sel, config)
     if plan.review and not plan.approved:
         return _fail(f"{item.identifier} needs review: {'; '.join(plan.review)}. See {plan.write(inbox)}")

@@ -41,7 +41,7 @@ def http_error(url: str, code: int, headers: dict | None = None) -> urllib.error
     msg = Message()
     for k, v in (headers or {}).items():
         msg[k] = v
-    return urllib.error.HTTPError(url, code, f"HTTP {code}", msg, None)
+    return urllib.error.HTTPError(url, code, f"HTTP {code}", msg, io.BytesIO(b""))
 
 
 class FakeArchive:
