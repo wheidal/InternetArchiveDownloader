@@ -1,6 +1,6 @@
 # iafetch: Requirements and Specification
 
-*Draft 0.2, 2026-10-28. "iafetch" is a working name.* The research behind this spec (terms of use, API limits, collection survey, item anatomy) is in [RESEARCH.md](RESEARCH.md). The review of existing downloaders is in [PRIOR_ART.md](PRIOR_ART.md). Requirements taken from it are marked *(prior art)*.
+*Draft 0.3, 2026-10-28.* The research behind this spec (terms of use, API limits, collection survey, item anatomy) is in [RESEARCH.md](RESEARCH.md). The review of existing downloaders is in [PRIOR_ART.md](PRIOR_ART.md). Requirements taken from it are marked *(prior art)*.
 
 ## 1. Overview
 
@@ -215,10 +215,16 @@ Generic handling, plus `description`, `creator`, `date` and `subject` embedded a
 
 ## 7. Configuration (sketch)
 
+**Everything iafetch writes goes under one root folder, `/mnt/synology/InternetArchive`.** Each kind of media gets its own subfolder, and so do the inbox and the archive of originals. It is a new folder of its own, so Archive downloads never mix with the rest of the NAS: your own music and films, and the Grateful Dead library, which deadfetch/deadtag keep managing in `Music/GratefulDead*`.
+
+- **R21. One root.** `root` is required. Every library, the inbox and the archive must resolve inside it (after following symlinks). A setting that points outside the root is a configuration error, and iafetch refuses to run. A path built from item metadata that would land outside it (see F15b) is refused too. The one exception is Grateful Dead items: the `deadtag` handler doesn't write them itself, but queues them with deadfetch, which keeps using its own folders (`Music/GratefulDead-Inbox` and the rest). iafetch writes nothing for them.
+- **R22. The root must exist and be mounted.** As with deadtag's library, iafetch never creates the root itself. If `/mnt/synology/InternetArchive` is missing (an unmounted NAS, a typo), it stops and says so, rather than quietly creating a local folder. You create the root once by hand. iafetch creates the subfolders inside it as needed.
+
 ```toml
 # ~/.config/iafetch/config.toml
-inbox   = "/mnt/synology/IA-Inbox"
-archive = "/mnt/synology/IA-Archive"   # original downloads kept after processing; omit to delete
+root    = "/mnt/synology/InternetArchive"   # must exist; everything below lives inside it
+inbox   = "_Inbox"      # relative paths are inside root
+archive = "_Archive"    # original downloads kept after processing; omit to delete
 acknowledged_terms = "2026-10-28"
 
 [net]
@@ -233,16 +239,20 @@ torrent_over = "20G"   # offer torrents above this size (off unless watch_dir is
 warn_bytes = "500G"
 warn_items = 10000
 
-[library]              # one root per kind
-music     = "/mnt/synology/Music"
-livemusic = "/mnt/synology/Music/Live"
-radio     = "/mnt/synology/Radio"
-audiobooks = "/mnt/synology/Audiobooks"
-movies    = "/mnt/synology/Video/Movies"
-tv        = "/mnt/synology/Video/TV"
-books     = "/mnt/synology/Books"
-games     = "/mnt/synology/Games"
-other     = "/mnt/synology/IA"
+[library]              # one folder per kind, inside root (these are the defaults)
+movies     = "Movies"
+tv         = "TV"
+music      = "Music"
+livemusic  = "Live Music"
+radio      = "Radio"
+audiobooks = "Audiobooks"
+books      = "Books"
+magazines  = "Magazines"
+comics     = "Comics"
+games      = "Games"
+images     = "Images"
+data       = "Data"
+other      = "Other"
 
 [handlers]             # collection -> handler; tried before the built-in rules
 GratefulDead = "deadtag"
@@ -256,6 +266,22 @@ nfo = true
 [texts]
 formats = ["pdf", "epub"]
 ```
+
+With those defaults, the NAS ends up like this:
+
+```
+/mnt/synology/InternetArchive/          created once by hand; iafetch makes the rest
+├── _Inbox/                             downloads in progress (hidden .partial folders), then verified items
+├── _Archive/                           original downloads, kept after processing
+├── Movies/   Reefer Madness (1936)/Reefer Madness (1936).mp4, .srt, movie.nfo, poster.jpg
+├── TV/       The Lone Ranger/Season 01/The Lone Ranger S01E01 - Enter the Lone Ranger.mp4
+├── Music/  Live Music/  Radio/  Audiobooks/
+├── Books/  Magazines/  Comics/
+├── Games/  Images/  Data/
+└── Other/                              anything the generic handler mirrors as-is
+```
+
+Adding these folders to Jellyfin as separate libraries (Movies and TV first) is optional and up to you. iafetch only writes the files and their `.nfo` metadata.
 
 ## 8. Command line (sketch)
 
@@ -284,12 +310,18 @@ iafetch catalog update [name]
 | **P3: Reading and listening** | audiobook (M4B), texts (PDF/EPUB/OPF, comics, magazines) | A LibriVox book plays in Audiobookshelf with chapters; a scanned book imports into Calibre with metadata |
 | **P4: The rest** | software, images, torrent offload, TUI, dashboard | |
 
-## 10. Open questions
+## 10. Decisions and open questions
 
-1. **Which kinds matter most to you?** The phase order above guesses (music and video first, given the Jellyfin plugin). Reordering is cheap now.
-2. **Shared code:** extract deadfetch's engine into a package both projects depend on (recommended), or let iafetch import from DeadShowTagger, or copy it?
-3. **The `internetarchive` library:** use the official `internetarchive` Python package for HTTP and metadata, or keep deadfetch's stdlib client? Recommended: **keep our own client**. The official library has no bandwidth cap, no shared rate limiter and no concurrency control; those are the parts that matter most here. Copy its good details instead (`cnt=0`, path guard, on-the-fly names, mtime skip; see [PRIOR_ART.md](PRIOR_ART.md)). Still read credentials from `ia.ini` so they work with the official `ia` tool.
-7. **Fix deadfetch now?** The prior-art review found three gaps in deadfetch's downloader: no `cnt=0`, no `Content-Range` check, and a 416 on resume fails the file. They're small fixes in DeadShowTagger.
-4. **Library roots:** are the paths in §7 right for your NAS and Jellyfin libraries?
-5. **Name:** keep `iafetch`?
-6. **Contacting the Archive:** large mirrors (whole OTR or 78 rpm sets run to terabytes) cross the R19 threshold. Is that a use you have in mind, in which case an email to info@archive.org comes first?
+Decided (2026-10-28):
+
+- **Video first.** The first media handler is `video` (films and TV for Jellyfin). Music comes after.
+- **Shared code is [iacore](https://github.com/wheidal/iacore)**, a separate public package (MIT) holding deadfetch's download engine. deadfetch uses it (DeadShowTagger branch `iacore-engine`), and iafetch builds on it.
+- **Our own client, not the official `internetarchive` library.** That library has no bandwidth cap, shared rate limiter or concurrency control, the parts that matter most here. Copy its good details instead (`cnt=0`, path guard, on-the-fly names, mtime skip; see [PRIOR_ART.md](PRIOR_ART.md)). Still read credentials from `ia.ini`, so they work with the official `ia` tool.
+- **deadfetch's three gaps are fixed** (`cnt=0`, the `Content-Range` check, restarting on a 416), in DeadShowTagger `b612ca3`.
+- **Everything goes under `/mnt/synology/InternetArchive`**, one subfolder per kind (§7, R21, R22).
+- **The name stays `iafetch`.**
+
+Still open:
+
+1. **Contacting the Archive:** large mirrors (whole OTR or 78 rpm sets run to terabytes) cross the R19 threshold. Is that a use you have in mind? If so, an email to info@archive.org comes first.
+2. **Jellyfin:** add `InternetArchive/Movies` and `InternetArchive/TV` as new libraries once the video handler works, or leave them out of Jellyfin?
