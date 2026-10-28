@@ -161,3 +161,59 @@ def opf(item, title: str, author: str, has_cover: bool) -> str:
             '<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="archive_id" version="2.0">\n'
             '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">\n'
             + "\n".join(lines) + "\n  </metadata>\n" + guide + "</package>\n")
+
+
+# --- a game's manual -------------------------------------------------------------------------------------
+
+# Where archive.org keeps the manuals for each platform's software
+MANUAL_COLLECTIONS = {"Commodore 64": "commodore_c64_manuals"}
+ENGLISH = {"eng", "english", "en"}
+REGION = re.compile(r"\((IT|DE|ES|FR|NL|SE|DK|FI|HU|PL|NO)\)", re.I)
+
+
+def base_title(title: str) -> str:
+    """A title reduced for matching a game with its manual: no "Commodore C64 Manual:" prefix, no tags in
+    brackets, no leading article, lower case, letters and digits only."""
+    title = re.sub(r"(?i)^commodore (c?64|c64 manual|64 manual)\s*:\s*", "", title)
+    title = re.sub(r"\s*[(\[][^)\]]*[)\]]", "", title)
+    title = re.sub(r"(?i),\s*the$", "", title.strip())
+    title = re.sub(r"(?i)^(the|a|an)\s+", "", title)
+    return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+
+
+def manual_docs(archive, game, platform: str) -> list[dict]:
+    """English manuals for the game in archive.org's manuals collection for its platform, best first."""
+    collection = MANUAL_COLLECTIONS.get(platform)
+    want = base_title(game.title)
+    if not collection or not want:
+        return []
+    from ..api import build_query
+    query = build_query(" ".join(f'title:"{w}"' for w in want.split()[:6]), collection=collection)
+    found = [d for d in archive.search_docs(query, ["identifier", "title", "language"], rows=50)
+             if base_title(str(d.get("title", ""))) == want and not REGION.search(str(d.get("title", "")))
+             and (not d.get("language") or {str(x).lower() for x in _as_list(d["language"])} & ENGLISH)]
+    return sorted(found, key=lambda d: ("[" in str(d.get("title", "")), str(d.get("title", ""))))
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def manual_plan(item, staged, selection, config, game_folder) -> Plan:
+    """A game's manual, filed in the game's folder as "Manual.pdf" (or by its own names, if several)."""
+    from pathlib import Path
+    dest = config.inside(Path(game_folder))
+    plan = Plan(item.identifier, "texts", str(staged), str(dest), sidecar=f".iafetch/{item.identifier}/iafetch.json")
+    for f in selection.files:
+        name = "Manual" + _ext(f) if len(selection.files) == 1 else _short(clean(PurePosixPath(f["name"]).stem)) + _ext(f)
+        if (dest / name).exists():
+            name = f"Manual [{item.identifier}]{_ext(f)}"
+        plan.moves.append([f["name"], name])
+    for f in selection.record:
+        plan.moves.append([f["name"], f".iafetch/{item.identifier}/{PurePosixPath(f['name']).name}"])
+    if selection.tile:
+        plan.moves.append([TILE, f".iafetch/{item.identifier}/{TILE}"])
+    if not selection.files:
+        plan.review.append("no PDF or EPUB to take (try --as generic)")
+    plan.approved = not plan.review
+    return plan

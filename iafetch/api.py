@@ -129,6 +129,13 @@ class Archive:
                             subject=subject, license=license)
         return _first_page(query, limit, self.client.get, SORTS.get(sort, sort))[:limit]
 
+    def search_docs(self, query: str, fields: list[str], rows: int = 50, sort: str = "downloads desc") -> list[dict]:
+        """One page of advanced search for `query` (already built, restrictions included), with `fields`."""
+        params = [("q", query), ("rows", str(rows)), ("page", "1"), ("output", "json"), ("sort[]", sort)]
+        params += [("fl[]", f) for f in fields]
+        data = parse_json(self.client.get(f"{ARCHIVE}/advancedsearch.php?" + urllib.parse.urlencode(params)))
+        return (data.get("response") or {}).get("docs") or []
+
     def scrape(self, query: str, fields: list[str], *, limit: int | None = None) -> list[dict]:
         """Every item matching `query` (restricted ones already filtered by build_query), through the scrape
         API's cursor (R8): no 10,000 ceiling, a pause between pages."""

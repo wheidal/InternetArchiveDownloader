@@ -55,10 +55,14 @@ def main(argv: list[str] | None = None) -> int:
                      "below); shows how many and how big first, and queues them only with --yes")
     _filter_args(add)
     add.add_argument("--yes", action="store_true", help="with --search: queue them")
+    add.add_argument("--no-manual", action="store_true", help="don't also queue a game's manual")
     _selection_args(add)
     qsub.add_parser("list", help="what's queued, and what happened to the rest")
     rm = qsub.add_parser("remove", help="take waiting items out of the queue")
-    rm.add_argument("items", nargs="+")
+    rm.add_argument("items", nargs="*")
+    rm.add_argument("--from", dest="from_file", type=Path, help="a text file of identifiers, one a line (the first "
+                    "word of each line; # starts a comment)")
+    man = qsub.add_parser("manuals", help="queue the manuals of the games already queued or downloaded")
     retry = qsub.add_parser("retry", help="queue failed items again")
     retry.add_argument("items", nargs="*", help="(default: every failed one)")
     qsub.add_parser("clear", help="remove everything still waiting")
@@ -227,8 +231,13 @@ def cmd_queue(args, config) -> int:
         print(f"\n{len(waiting)} waiting, about {_size(sum(e.size for e in waiting))}")
         return EXIT_OK
     if args.action == "remove":
-        n = sum(queue.remove(identifier_of(x)[0]) for x in args.items)
-        print(f"Removed {n}.")
+        keys = list(args.items) + (_lines(args.from_file) if args.from_file else [])
+        if not keys:
+            return _fail("remove what? Give identifiers, or --from a file of them")
+        n = sum(queue.remove(identifier_of(x.split()[0])[0]) for x in keys)
+        print(f"Removed {n} of {len(keys)} (the rest weren't waiting in the queue).")
+    elif args.action == "manuals":
+        return _queue_manuals(config, queue)
     elif args.action == "retry":
         print(f"Queued {queue.retry([identifier_of(x)[0] for x in args.items] or None)} again.")
     elif args.action == "clear":
@@ -237,10 +246,7 @@ def cmd_queue(args, config) -> int:
 
 
 def _queue_add(args, config, queue) -> int:
-    texts = list(args.items)
-    if args.from_file:
-        texts += [x.strip() for x in args.from_file.read_text(encoding="utf-8").splitlines()
-                  if x.strip() and not x.lstrip().startswith("#")]
+    texts = list(args.items) + (_lines(args.from_file) if args.from_file else [])
     archive = _archive(config, log=print)
     if args.search is not None or any(_filters(args).values()):
         found = _search_to_queue(args, archive)
@@ -269,10 +275,59 @@ def _queue_add(args, config, queue) -> int:
         if queue.add(Entry(item.identifier, item.title, size, args.handler, options)):
             added += 1
             print(f"queued {identifier} ({_size(size)}, {handler.name}; {rights.license_text(item)})")
+            if handler.name == "software" and not args.no_manual:
+                added += _queue_manual(item, config, archive, queue)
         else:
             print(f"{identifier}: already queued")
     print(f"{added} added. Download with: iafetch get")
     return EXIT_OK
+
+
+def _queue_manual(game, config, archive, queue) -> int:
+    """Queue the game's English manual, if archive.org has one, to be filed in the game's folder. 1 if queued."""
+    from .handlers.software import platform
+    from .handlers.texts import manual_docs
+    docs = manual_docs(archive, game, platform(game))
+    if not docs:
+        return 0
+    d = docs[0]
+    manual = archive.item(d["identifier"])
+    size = selection(choose(manual, config)[0], manual, {}, config).size
+    if queue.add(Entry(d["identifier"], manual.title, size, "texts", {"manual_for": game.identifier})):
+        print(f"  with its manual: {d['identifier']} ({_size(size)})")
+        return 1
+    queued = queue.get(d["identifier"])
+    if queued and queued.status == PENDING:  # already waiting (e.g. queued with a whole collection)
+        queue.set_options(d["identifier"], {**queued.options, "manual_for": game.identifier})
+        print(f"  its manual {d['identifier']} is already queued; it will go in the game's folder")
+        return 1
+    print(f"  its manual {d['identifier']} was downloaded before ({queued.result if queued else ''})")
+    return 0
+
+
+def _queue_manuals(config, queue) -> int:
+    from .handlers.software import Software
+    archive = _archive(config)
+    games = [e for e in queue.all() if e.status in (PENDING, DONE)]
+    added = 0
+    for e in games:
+        item = archive.item(e.identifier)
+        if choose(item, config, e.handler)[0].name != Software.name:
+            continue
+        if any(x.options.get("manual_for") == e.identifier for x in queue.all()):
+            continue
+        print(f"{item.title}:")
+        n = _queue_manual(item, config, archive, queue)
+        if not n:
+            print("  no English manual on archive.org")
+        added += n
+    print(f"{added} manual(s) queued. Download with: iafetch get")
+    return EXIT_OK
+
+
+def _lines(path: Path) -> list[str]:
+    """The non-blank, non-comment lines of a text file."""
+    return [x.strip() for x in path.read_text(encoding="utf-8").splitlines() if x.strip() and not x.lstrip().startswith("#")]
 
 
 def _search_to_queue(args, archive) -> list[str] | None:
@@ -409,7 +464,13 @@ def _get_one(e: Entry, config, archive, inbox: Path, throttle, progress, no_proc
         say(f"   {staged.files} file(s) verified" + (f" ({staged.reused} from an earlier run)" if staged.reused else ""))
     if no_process:
         return DONE, f"downloaded to {staged_folder}", got
-    plan = handler.plan(item, staged_folder, sel, config)
+    game = e.options.get("manual_for")
+    game_entry = Queue().get(game) if game else None
+    if game_entry and game_entry.status == DONE and game_entry.result:
+        from .handlers.texts import manual_plan
+        plan = manual_plan(item, staged_folder, sel, config, game_entry.result)
+    else:
+        plan = handler.plan(item, staged_folder, sel, config)
     if plan.review:
         path = plan.write(inbox)
         return REVIEW, f"{'; '.join(plan.review)}. Edit {path}, set \"approved\": true, then: iafetch process {path}", got

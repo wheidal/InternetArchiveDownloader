@@ -41,6 +41,7 @@ iafetch picks --top 25                        # the best-rated public-domain fil
 iafetch picks --year 1920-1929 --queue        # ... and queue them
 iafetch picks --country France --year 1895-1930   # by country of origin
 iafetch queue list
+iafetch queue remove --from unwanted.txt         # many at once: one identifier a line
 iafetch get                                   # or: get --background, then iafetch status
 iafetch process <identifier>                  # file an item after reviewing its plan
 ```

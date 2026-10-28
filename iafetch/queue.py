@@ -85,6 +85,10 @@ class Queue:
             self.db.execute("UPDATE queue SET status = ?, error = ?, result = ? WHERE identifier = ?",
                             (status, error, result, identifier))
 
+    def set_options(self, identifier: str, options: dict) -> None:
+        with self.db:
+            self.db.execute("UPDATE queue SET options = ? WHERE identifier = ?", (json.dumps(options), identifier))
+
     def still_pending(self, identifier: str) -> bool:
         return bool(self.db.execute("SELECT 1 FROM queue WHERE identifier = ? AND status = ?",
                                     (identifier, PENDING)).fetchone())

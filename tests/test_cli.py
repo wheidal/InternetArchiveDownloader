@@ -12,7 +12,9 @@ from iafetch.queue import Queue
 from tests.support import FakeArchive, file
 
 
-class CliTest(unittest.TestCase):
+class CliBase(unittest.TestCase):
+    """A fake archive.org and a root in a temp folder, for running iafetch's commands."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -43,6 +45,8 @@ class CliTest(unittest.TestCase):
             code = cli.main(list(argv))
         return code, out.getvalue()
 
+
+class CliTest(CliBase):
     def test_show(self):
         code, out = self.run_cli("show", "https://archive.org/details/film", "--as", "generic")
         self.assertEqual(code, 0)
@@ -180,3 +184,57 @@ class CliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GameManualTest(CliBase):
+    def setUp(self):
+        super().setUp()
+        self.fake.add("impossible_mission", [file("Impossible_Mission.d64", fmt="Unknown"),
+                                             file("00_coverscreenshot.jpg", fmt="JPEG")],
+                      mediatype="software", title="Commodore 64: Impossible Mission (Clean)", date="1984",
+                      collection=["softwarelibrary_c64_games", "softwarelibrary_c64"])
+        self.fake.add("im_manual", [file("im.pdf", fmt="Text PDF")], mediatype="texts",
+                      title="Commodore C64 Manual: Impossible Mission (1984)(Epyx)", collection=["commodore_c64_manuals"])
+        self.fake.search_docs = [
+            {"identifier": "im_manual_it", "title": "Commodore C64 Manual: Impossible Mission (1984)(Epyx)(IT)", "language": "ita"},
+            {"identifier": "im2_manual", "title": "Commodore C64 Manual: Impossible Mission II (1988)(Epyx)", "language": "eng"},
+            {"identifier": "im_manual_a", "title": "Commodore C64 Manual: Impossible Mission (1984)(Epyx)[a]", "language": "eng"},
+            {"identifier": "im_manual", "title": "Commodore C64 Manual: Impossible Mission (1984)(Epyx)", "language": "eng"},
+        ]
+
+    def test_a_game_brings_its_manual_into_its_folder(self):
+        code, out = self.run_cli("queue", "add", "impossible_mission")
+        self.assertIn("with its manual: im_manual", out)
+        self.assertEqual([e.identifier for e in Queue().pending()], ["impossible_mission", "im_manual"])
+        code, out = self.run_cli("get")
+        self.assertEqual(code, 0, out)
+        game = self.root / "Games" / "Commodore 64" / "Commodore 64 - Impossible Mission (Clean) (1984)"
+        self.assertTrue((game / "Impossible_Mission.d64").is_file(), out)
+        self.assertTrue((game / "Manual.pdf").is_file(), out)
+        self.assertTrue((game / ".iafetch" / "im_manual" / "iafetch.json").is_file())
+        self.assertFalse((self.root / "Books").exists())
+
+    def test_no_manual_when_asked(self):
+        code, out = self.run_cli("queue", "add", "impossible_mission", "--no-manual")
+        self.assertEqual([e.identifier for e in Queue().pending()], ["impossible_mission"])
+
+    def test_manuals_for_games_already_queued(self):
+        self.run_cli("queue", "add", "impossible_mission", "--no-manual")
+        code, out = self.run_cli("queue", "manuals")
+        self.assertIn("1 manual(s) queued", out)
+        code, out = self.run_cli("queue", "manuals")
+        self.assertIn("0 manual(s) queued", out)
+
+    def test_a_manual_already_queued_moves_to_its_game(self):
+        self.run_cli("queue", "add", "im_manual")
+        code, out = self.run_cli("queue", "add", "impossible_mission")
+        self.assertIn("already queued; it will go in the game's folder", out)
+        self.assertEqual(Queue().get("im_manual").options, {"manual_for": "impossible_mission"})
+
+    def test_remove_from_a_file(self):
+        self.run_cli("queue", "add", "impossible_mission", "film", "--no-manual")
+        listing = self.root.parent / "drop.txt"
+        listing.write_text("# to drop\nfilm\tA Film\tnot wanted\nnot-queued\n")
+        code, out = self.run_cli("queue", "remove", "--from", str(listing))
+        self.assertIn("Removed 1 of 2", out)
+        self.assertEqual([e.identifier for e in Queue().pending()], ["impossible_mission"])

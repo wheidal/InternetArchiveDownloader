@@ -90,3 +90,13 @@ class TextsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManualTitleTest(unittest.TestCase):
+    def test_base_titles_match_game_and_manual(self):
+        from iafetch.handlers.texts import base_title
+        self.assertEqual(base_title("Commodore C64 Manual: Impossible Mission (1984)(Epyx)[a]"), "impossible mission")
+        self.assertEqual(base_title("Commodore 64: Impossible Mission (Clean)"), "impossible mission")
+        self.assertEqual(base_title("Commodore C64 Manual: Last Ninja, The (1987)(System 3)"), "last ninja")
+        self.assertEqual(base_title("The Last Ninja (Side A)"), "last ninja")
+        self.assertEqual(base_title("Ghosts 'n Goblins"), "ghosts n goblins")
