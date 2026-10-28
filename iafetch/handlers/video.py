@@ -224,7 +224,7 @@ def film_title(item) -> str:
     main, alt = m.group(1), m.group(3)
     main = ARTICLE.sub(r"\2 \1", main.strip())
     if alt:
-        main += f" ({ARTICLE.sub(r'\2 \1', alt.strip())})"
+        main += " (" + ARTICLE.sub(r"\2 \1", alt.strip()) + ")"
     return clean(main)
 
 
