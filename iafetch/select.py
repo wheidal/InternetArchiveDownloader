@@ -18,6 +18,7 @@ JUNK_FORMATS = (
 JUNK_SUFFIXES = ("_meta.sqlite", "_reviews.xml", ".asr.js", "_spectrogram.png", ".afpk", ".log", ".trigger",
                  "_files.xml", "_meta.xml", "_archive.torrent")
 JUNK_PARTS = (".thumbs/", "_thumbs/", "__ia_thumb.jpg")
+JUNK_PREFIXES = ("history/",)  # earlier versions of replaced files, kept by archive.org
 
 # Kept with every item as the record of what was downloaded (F16). _files.xml has no size, and the MD5 it
 # lists for itself can't be right, so it's never checked against it (F15c).
@@ -28,7 +29,7 @@ TILE = "__ia_thumb.jpg"
 def junk(f: dict) -> bool:
     name, fmt = f.get("name", ""), f.get("format", "").lower()
     return (any(j in fmt for j in JUNK_FORMATS) or name.lower().endswith(JUNK_SUFFIXES)
-            or any(p in name for p in JUNK_PARTS))
+            or any(p in name for p in JUNK_PARTS) or name.startswith(JUNK_PREFIXES))
 
 
 @dataclass

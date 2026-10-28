@@ -3,11 +3,12 @@ rule, then generic. Rules naming a handler that isn't built yet fall back to gen
 
 from .deadtag import Deadtag
 from .generic import Generic
+from .software import Software
 from .texts import Texts
 from .video import Video
 
-HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts())}
-MEDIATYPES = {"movies": "video", "texts": "texts"}  # mediatype -> handler
+HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software())}
+MEDIATYPES = {"movies": "video", "texts": "texts", "software": "software"}  # mediatype -> handler
 
 
 def choose(item, config, override: str = "") -> tuple[object, str]:

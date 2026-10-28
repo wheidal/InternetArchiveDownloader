@@ -71,6 +71,15 @@ class TextsTest(unittest.TestCase):
             import xml.dom.minidom
             xml.dom.minidom.parseString(opf)  # well-formed
 
+    def test_a_second_scan_of_the_same_book_is_kept_beside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = parse_config({"root": tmp})
+            it = item(TOSEC_MANUAL, title="Guide", date="1983", creator=["Commodore"])
+            (Path(tmp) / "Books" / "Commodore" / "Guide (1983)").mkdir(parents=True)
+            plan = Texts().plan(it, Path(tmp) / "x", selection(Texts(), it, {}, config), config)
+            self.assertTrue(plan.approved, plan.review)
+            self.assertTrue(plan.dest.endswith("Guide (1983) [book]"))
+
     def test_nothing_readable_goes_to_review(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = parse_config({"root": tmp})

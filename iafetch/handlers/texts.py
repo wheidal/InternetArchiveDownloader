@@ -56,6 +56,8 @@ class Texts(Handler):
         title, year, author = book_title(item), item.year, author_of(item)
         name = _short(f"{title} ({year})" if year else title)
         dest = config.inside(config.folder("books") / _short(author) / name)
+        if dest.exists():  # another scan or edition of the same book: keep both
+            dest = config.inside(dest.parent / f"{name} [{item.identifier}]")
         plan = Plan(item.identifier, self.name, str(staged), str(dest), sidecar=f".iafetch/{item.identifier}/iafetch.json")
         by_ext = defaultdict(list)
         for f in selection.files:

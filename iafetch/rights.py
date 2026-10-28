@@ -13,6 +13,7 @@ RESTRICTED_COLLECTIONS = {"stream_only", "inlibrary", "printdisabled", "lendingl
 ENCRYPTED = ("_lcp.pdf", "_lcp.epub", ".acsm")  # DRM-wrapped lending copies: never selected
 
 SIDECAR = "iafetch.json"
+EMULATOR_FIELDS = ("emulator", "emulator_ext", "emulator_start")  # how archive.org runs software in the browser
 
 TERMS = """\
 Before the first download: the Internet Archive's terms of use
@@ -86,6 +87,7 @@ def sidecar(item, files: list[dict], processed: dict[str, str] | None = None, ha
         "files": [{"name": f["name"], "size": _int(f.get("size")), "md5": f.get("md5"), "sha1": f.get("sha1")}
                   for f in files],
         "processed": processed or {},
+        **{k: item.field(k).strip() for k in EMULATOR_FIELDS if item.field(k).strip()},
     }
 
 

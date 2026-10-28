@@ -2,7 +2,7 @@
 
 Find, download, verify and file media from the [Internet Archive](https://archive.org): films, TV, music, radio, audiobooks, books and more, each into a library folder its player understands. It's deadfetch (from [DeadShowTagger](https://github.com/wheidal/DeadShowTagger)) generalized, built on the same engine, [iacore](https://github.com/wheidal/iacore).
 
-**Status: phase 1 (the engine), and the video and texts handlers.** Search, show, the queue and verified downloads work. Films go to `Movies/` and TV series to `TV/`, named and with `.nfo` files the way Jellyfin expects. Books and manuals go to `Books/` as searchable PDFs with Calibre's `metadata.opf`. Other kinds are mirrored as-is by the generic handler until their handlers are written. Grateful Dead items are handed to deadfetch. See [SPEC.md](SPEC.md) for the whole plan, [RESEARCH.md](RESEARCH.md) for archive.org's rules and layout, and [PRIOR_ART.md](PRIOR_ART.md) for what other downloaders taught us.
+**Status: phase 1 (the engine), and the video, texts and software handlers.** Search, show, the queue and verified downloads work. Films go to `Movies/` and TV series to `TV/`, named and with `.nfo` files the way Jellyfin expects. Books and manuals go to `Books/` as searchable PDFs with Calibre's `metadata.opf`. Games and other software go to `Games/{platform}/`, kept as published for emulators. Other kinds are mirrored as-is by the generic handler until their handlers are written. Grateful Dead items are handed to deadfetch. See [SPEC.md](SPEC.md) for the whole plan, [RESEARCH.md](RESEARCH.md) for archive.org's rules and layout, and [PRIOR_ART.md](PRIOR_ART.md) for what other downloaders taught us.
 
 ## Being a good citizen
 
