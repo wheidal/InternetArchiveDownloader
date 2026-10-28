@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from .api import Archive, build_query, identifier_of
 from .config import ConfigError, acknowledge_terms, load_config
 from .download import DiskFull, download_item
 from .handlers import choose, selection
+from .handlers.video import picture
 from .handlers.base import Plan, PLAN_SUFFIX
 from .handlers.deadtag import HandOffError
 from .net import Client, Stopped
@@ -73,6 +75,19 @@ def main(argv: list[str] | None = None) -> int:
 
     proc = sub.add_parser("process", help="file a downloaded item from the inbox (after reviewing its plan)")
     proc.add_argument("item", help=f"identifier, or its {PLAN_SUFFIX} file")
+
+    pk = sub.add_parser("picks", help="the best-rated films on archive.org (by IMDb), each with its sharpest copy",
+                        description="Films Wikidata links to archive.org, ranked by IMDb rating, each with its sharpest "
+                        "plausible upload. By default only films Wikidata records as public domain in the US: a "
+                        "volunteer-kept record, a good guide but not legal advice.")
+    pk.add_argument("--top", type=int, default=25, help="how many films (default 25)")
+    pk.add_argument("--min-votes", type=int, default=5000, help="IMDb votes a rating needs to count (default 5000)")
+    pk.add_argument("--year", help="1940, or a range: 1920-1949")
+    pk.add_argument("--copies", action="store_true", help="list every upload of each film, not only the best")
+    pk.add_argument("--queue", action="store_true", help="queue the best copy of each film listed (never a doubtful one)")
+    pk.add_argument("--any-rights", action="store_true", help="not only films Wikidata says are public domain in "
+                    "the US; whether you may download the rest is up to you")
+    pk.add_argument("--refresh", action="store_true", help="read Wikidata's and IMDb's lists again")
 
     sub.add_parser("status", help="what a running get is doing")
     sub.add_parser("terms", help="read the Internet Archive's terms notice and acknowledge it")
@@ -162,7 +177,8 @@ def cmd_show(args, config) -> int:
         if junk(f) and f["name"] not in chosen:
             continue
         mark = "*" if f["name"] in chosen else " "
-        print(f"   {mark} {f['name']:<50} {f.get('source', ''):<10} {f.get('format', ''):<22} {_size(size_of(f)):>9}")
+        print(f"   {mark} {f['name']:<50} {f.get('source', ''):<10} {f.get('format', ''):<22} {_size(size_of(f)):>9}"
+              + (f"  {picture(f)}" if picture(f) else ""))
     hidden = sum(1 for f in item.files if junk(f))
     print(f"\n  {len(sel.files)} file(s), {_size(sel.size)} with the item's records"
           f" -> {config.folder(handler.kind(item))}")
@@ -432,6 +448,65 @@ def cmd_process(args, config) -> int:
     return EXIT_OK
 
 
+# --- picks --------------------------------------------------------------------------------------------
+
+def cmd_picks(args, config) -> int:
+    from . import picks
+    if not 1 <= args.top <= 500:
+        raise ValueError("--top must be 1 to 500")
+    years = _years(args.year) if args.year else None
+    films = picks.ranked(picks.Lists(log=print).films(refresh=args.refresh), min_votes=args.min_votes, years=years,
+                         any_rights=args.any_rights)
+    if not films:
+        print("No rated films match.")
+        return EXIT_OK
+    archive = _archive(config)
+    which = "rated films" if args.any_rights else "rated films in the US public domain (per Wikidata)"
+    print(f"Finding the best copy of each, among {len(films):,} {which} (archive.org metadata, about one a second "
+          f"the first time)...")
+    found = picks.best_copies(films, archive, top=args.top, config=config)
+    queue = Queue()
+    queued = 0
+    print()
+    for n, (film, copies) in enumerate(found, 1):
+        year = f" ({film.year})" if film.year else ""
+        rights = "" if film.public_domain else "   (not known to be public domain)"
+        print(f"{n:>3}. {film.title}{year}   IMDb {film.rating:.1f} ({film.votes:,} votes){rights}")
+        for i, c in enumerate(copies if args.copies else copies[:1]):
+            entry = queue.get(c.identifier)
+            mark = f" [{entry.status}]" if entry else ""
+            stars = f"  {c.stars:.1f}/5 ({c.reviews})" if c.stars else ""
+            parts = f", {c.parts} parts" if c.parts > 1 else ""
+            doubt = f"  ? {c.doubt}" if c.doubt else ""
+            print(f"       {c.identifier:<40} {c.picture:<26} {_size(c.size):>9}{parts}{stars}{mark}{doubt}")
+        if not args.copies and len(copies) > 1:
+            print(f"       ({len(copies) - 1} other cop{'y' if len(copies) == 2 else 'ies'}: --copies lists them)")
+        best = copies[0]
+        if args.queue and not best.doubt and not queue.get(best.identifier):
+            item = archive.item(best.identifier)
+            sel = selection(choose(item, config)[0], item, {}, config)
+            if queue.add(Entry(best.identifier, item.title, sel.size)):
+                queued += 1
+    print("\nRatings: IMDb (personal, non-commercial use); films and their archive.org IDs: Wikidata.")
+    print("A ? marks an upload that may be a cut version, a fragment or another film: its length, year or title "
+          "disagrees with Wikidata's. It's never queued.")
+    if args.any_rights:
+        print("Films not known to be public domain may be uploads without the rights holder's permission; "
+              "archive.org's terms ask for non-infringing use.")
+    if args.queue:
+        print(f"{queued} queued. Download with: iafetch get")
+    else:
+        print("Queue the best copies with --queue, or one at a time with: iafetch queue add <identifier>")
+    return EXIT_OK
+
+
+def _years(text: str) -> tuple[int, int]:
+    m = re.fullmatch(r"(\d{4})(?:-(\d{4}))?", text.strip())
+    if not m:
+        raise ValueError(f"--year {text}: give a year (1940) or a range (1920-1949)")
+    return int(m.group(1)), int(m.group(2) or m.group(1))
+
+
 # --- status, terms ----------------------------------------------------------------------------------
 
 def cmd_status(args, config) -> int:
@@ -547,5 +622,5 @@ def _clock(t: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
 
 
-COMMANDS = {"search": cmd_search, "show": cmd_show, "queue": cmd_queue, "get": cmd_get, "process": cmd_process,
+COMMANDS = {"search": cmd_search, "show": cmd_show, "picks": cmd_picks, "queue": cmd_queue, "get": cmd_get, "process": cmd_process,
             "status": cmd_status, "terms": cmd_terms}

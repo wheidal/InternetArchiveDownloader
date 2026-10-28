@@ -4,6 +4,7 @@ touches the network."""
 import hashlib
 import io
 import json
+import re
 import urllib.error
 import urllib.parse
 from email.message import Message
@@ -14,9 +15,9 @@ def body(name: str, size: int = 1000) -> bytes:
 
 
 def file(name: str, source: str = "original", fmt: str = "MPEG2", size: int = 1000, **extra) -> dict:
-    data = body(name, size)
-    return {"name": name, "source": source, "format": fmt, "size": str(size),
-            "md5": hashlib.md5(data).hexdigest(), **extra}
+    # Files the size of real films are only listed, never downloaded: their bytes aren't made
+    md5 = hashlib.md5(body(name, size)).hexdigest() if size <= 10 ** 6 else "f" * 32
+    return {"name": name, "source": source, "format": fmt, "size": str(size), "md5": md5, **extra}
 
 
 def item_json(identifier: str, files: list[dict], **metadata) -> dict:
@@ -69,6 +70,12 @@ class FakeArchive:
             return json.dumps({"items": [{"identifier": i, "title": d["metadata"]["title"], "item_size": d["item_size"]}
                                          for i, d in self.items.items()], "total": len(self.items)}).encode()
         if path == "/advancedsearch.php":
+            q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))["q"]
+            if q.startswith("identifier:("):  # a lookup of particular items
+                wanted = set(re.findall(r'"([^"]+)"', q.split(")", 1)[0]))
+                docs = [{"identifier": i, "mediatype": d["metadata"].get("mediatype"), **d.get("search", {})}
+                        for i, d in self.items.items() if i in wanted]
+                return json.dumps({"response": {"numFound": len(docs), "docs": docs}}).encode()
             return json.dumps({"response": {"numFound": len(self.search_docs), "docs": self.search_docs}}).encode()
         raise FetchError(f"{url}: HTTP 404") from http_error(url, 404)
 

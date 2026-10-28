@@ -37,12 +37,16 @@ iafetch queue add AboutBan1935                # a film -> Movies/About Bananas (
 iafetch queue add get-smart --glob '*S01E*'    # season 1 of a series -> TV/Get Smart/Season 01/
 iafetch queue add --search '"commodore 64" AND programming' --collection manuals_commodore   # how many, how big
 iafetch queue add --search '"commodore 64" AND programming' --collection manuals_commodore --yes   # queue them
+iafetch picks --top 25                        # the best-rated public-domain films, each with its sharpest copy
+iafetch picks --year 1920-1929 --queue        # ... and queue them
 iafetch queue list
 iafetch get                                   # or: get --background, then iafetch status
 iafetch process <identifier>                  # file an item after reviewing its plan
 ```
 
 The first `get` shows the Archive's terms notice once and asks you to acknowledge it (`iafetch terms`).
+
+`picks` uses [Wikidata](https://www.wikidata.org) (CC0) to know which archive.org items are which film and whether each is public domain in the US, and [IMDb's ratings dataset](https://developer.imdb.com/non-commercial-datasets/) (for personal, non-commercial use) to rank them. Wikidata's copyright status is kept by volunteers: a good guide, not legal advice.
 
 Settings are in `~/.config/iafetch/config.toml` (see [SPEC.md §7](SPEC.md#7-configuration-sketch)); the queue, metadata cache and status are in `~/.local/share/iafetch/`.
 

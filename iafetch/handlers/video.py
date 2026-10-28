@@ -263,19 +263,33 @@ def plot(item) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def runtime(f: dict | None) -> int | None:
-    """Minutes, from archive.org's `length` (seconds, or h:mm:ss)."""
-    value = str((f or {}).get("length") or "")
+def seconds_of(value) -> float:
+    """archive.org's `length` (seconds, or h:mm:ss) in seconds; 0 if it's missing or unreadable."""
+    text = str(value or "")
     try:
-        if ":" in value:
-            seconds = 0.0
-            for part in value.split(":"):
-                seconds = seconds * 60 + float(part)
-        else:
-            seconds = float(value)
+        total = 0.0
+        for part in text.split(":"):
+            total = total * 60 + float(part)
+        return total
     except ValueError:
-        return None
-    return round(seconds / 60) or None
+        return 0.0
+
+
+def runtime(f: dict | None) -> int | None:
+    """Minutes, from archive.org's `length`."""
+    return round(seconds_of((f or {}).get("length")) / 60) or None
+
+
+def picture(f: dict) -> str:
+    """A video file's resolution and bitrate, as archive.org lists them ("640x480, 0.8 Mbit/s"), or ""."""
+    try:
+        width, height = int(float(f["width"])), int(float(f["height"]))
+    except (KeyError, TypeError, ValueError):
+        return ""
+    if not (width and height):  # audio: archive.org lists it as 0x0
+        return ""
+    seconds, size = seconds_of(f.get("length")), size_of(f)
+    return f"{width}x{height}" + (f", {size * 8 / seconds / 1e6:.1f} Mbit/s" if seconds and size else "")
 
 
 def _nfo(root: str, fields: list[tuple[str, str | None]], item) -> str:

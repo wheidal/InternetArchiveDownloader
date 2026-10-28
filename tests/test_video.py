@@ -102,6 +102,14 @@ class NamesTest(unittest.TestCase):
                             ("Get Smart", "Get Smart"), ("Batman: The Movie Serial", "Batman - The Movie Serial")):
             self.assertEqual(series_name(item("x", [], title=title)), want)
 
+    def test_picture(self):
+        from iafetch.handlers.video import picture
+        self.assertEqual(picture({"width": "635", "height": "480", "length": "5460", "size": "1775000000"}),
+                         "635x480, 2.6 Mbit/s")
+        self.assertEqual(picture({"width": "640", "height": "480"}), "640x480")
+        self.assertEqual(picture({"width": "0", "height": "0", "length": "60", "size": "1000"}), "")
+        self.assertEqual(picture({"name": "x.srt"}), "")
+
     def test_runtime(self):
         self.assertEqual(runtime({"length": "1519.65"}), 25)
         self.assertEqual(runtime({"length": "1:02:40"}), 63)
