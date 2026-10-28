@@ -65,6 +65,9 @@ class FakeArchive:
         path = urllib.parse.urlsplit(url).path
         if path.startswith("/metadata/"):
             return json.dumps(self.items.get(urllib.parse.unquote(path.split("/", 2)[2]), {})).encode()
+        if path == "/services/search/v1/scrape":
+            return json.dumps({"items": [{"identifier": i, "title": d["metadata"]["title"], "item_size": d["item_size"]}
+                                         for i, d in self.items.items()], "total": len(self.items)}).encode()
         if path == "/advancedsearch.php":
             return json.dumps({"response": {"numFound": len(self.search_docs), "docs": self.search_docs}}).encode()
         raise FetchError(f"{url}: HTTP 404") from http_error(url, 404)

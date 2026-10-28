@@ -2,7 +2,7 @@
 
 Find, download, verify and file media from the [Internet Archive](https://archive.org): films, TV, music, radio, audiobooks, books and more, each into a library folder its player understands. It's deadfetch (from [DeadShowTagger](https://github.com/wheidal/DeadShowTagger)) generalized, built on the same engine, [iacore](https://github.com/wheidal/iacore).
 
-**Status: phase 1 (the engine) and the video handler.** Search, show, the queue and verified downloads work. Films go to `Movies/` and TV series to `TV/`, named and with `.nfo` files the way Jellyfin expects. Other kinds are mirrored as-is by the generic handler until their handlers are written. Grateful Dead items are handed to deadfetch. See [SPEC.md](SPEC.md) for the whole plan, [RESEARCH.md](RESEARCH.md) for archive.org's rules and layout, and [PRIOR_ART.md](PRIOR_ART.md) for what other downloaders taught us.
+**Status: phase 1 (the engine), and the video and texts handlers.** Search, show, the queue and verified downloads work. Films go to `Movies/` and TV series to `TV/`, named and with `.nfo` files the way Jellyfin expects. Books and manuals go to `Books/` as searchable PDFs with Calibre's `metadata.opf`. Other kinds are mirrored as-is by the generic handler until their handlers are written. Grateful Dead items are handed to deadfetch. See [SPEC.md](SPEC.md) for the whole plan, [RESEARCH.md](RESEARCH.md) for archive.org's rules and layout, and [PRIOR_ART.md](PRIOR_ART.md) for what other downloaders taught us.
 
 ## Being a good citizen
 
@@ -35,6 +35,8 @@ iafetch search --collection prelinger --year 1930-1939 --license pd
 iafetch show AboutBan1935                     # metadata, license, handler, and which files it would take
 iafetch queue add AboutBan1935                # a film -> Movies/About Bananas (1935)/
 iafetch queue add get-smart --glob '*S01E*'    # season 1 of a series -> TV/Get Smart/Season 01/
+iafetch queue add --search '"commodore 64" AND programming' --collection manuals_commodore   # how many, how big
+iafetch queue add --search '"commodore 64" AND programming' --collection manuals_commodore --yes   # queue them
 iafetch queue list
 iafetch get                                   # or: get --background, then iafetch status
 iafetch process <identifier>                  # file an item after reviewing its plan

@@ -264,7 +264,7 @@ subtitles = true
 nfo = true
 
 [texts]
-formats = ["pdf", "epub"]
+formats = ["pdf"]      # add "epub" for archive.org's OCR'd EPUBs
 ```
 
 With those defaults, the NAS ends up like this:
@@ -310,7 +310,7 @@ iafetch catalog update [name]
 | **P3: Reading and listening** | audiobook (M4B), texts (PDF/EPUB/OPF, comics, magazines) | A LibriVox book plays in Audiobookshelf with chapters; a scanned book imports into Calibre with metadata |
 | **P4: The rest** | software, images, torrent offload, TUI, dashboard | |
 
-**Progress (2026-10-28):** `config` (R21, R22), `net` (R1-R7, R13), `api` (metadata cache, search with the restriction filter, F5), `select` (R10, R11, F7), `download` (F15, F15b, F15d, F16), `queue` (SQLite), `rights` (R14, R16-R18), the generic and deadtag handlers, and `search`, `show`, `queue`, `get` (with R19), `process`, `status`, `terms`. `video` (§6.7, from P2) is done too: one copy per video (the uploaded MP4, else archive.org's h.264; `[video] quality`), `.srt`/`.vtt` subtitles, films to `Movies/{title} ({year})/` with `movie.nfo` and `poster.jpg`, series to `TV/{series}/Season {ss}/` with `tvshow.nfo`, and the item's records in a hidden `.iafetch/<identifier>/`. Episodes are numbered from `SxxEyy`, `1x01` or a trailing number. Run-together names (`s01e01_EntertheLoneRanger`) give titles like "Enterthe Lone Ranger": the split isn't guessed. F8's `--episodes` isn't built; `--glob` selects episodes meanwhile. Still to do in P1: catalogs (F3) and `browse` (F2), SHA-1 checks (F15c: iacore checks MD5 only), the ramp-up and concurrency above 1 (downloads run one at a time), `verify` (F17) and `refresh` (F17a).
+**Progress (2026-10-28):** `config` (R21, R22), `net` (R1-R7, R13), `api` (metadata cache, search with the restriction filter, F5), `select` (R10, R11, F7), `download` (F15, F15b, F15d, F16), `queue` (SQLite), `rights` (R14, R16-R18), the generic and deadtag handlers, and `search`, `show`, `queue`, `get` (with R19), `process`, `status`, `terms`. `video` (§6.7, from P2) is done too: one copy per video (the uploaded MP4, else archive.org's h.264; `[video] quality`), `.srt`/`.vtt` subtitles, films to `Movies/{title} ({year})/` with `movie.nfo` and `poster.jpg`, series to `TV/{series}/Season {ss}/` with `tvshow.nfo`, and the item's records in a hidden `.iafetch/<identifier>/`. Episodes are numbered from `SxxEyy`, `1x01` or a trailing number. Run-together names (`s01e01_EntertheLoneRanger`) give titles like "Enterthe Lone Ranger": the split isn't guessed. F8's `--episodes` isn't built; `--glob` selects episodes meanwhile. `texts` (§6.8, books part, from P3) is done: the searchable PDF (the uploaded Text PDF, else archive.org's Additional Text PDF; never the page scans), the EPUB only if `[texts] formats` asks (archive.org's are OCR'd), filed as `Books/{author}/{title} ({year})/` with Calibre's `metadata.opf` and `cover.jpg`. TOSEC title tags (`(1983)(Commodore)`) give the year and, failing a creator, the author. Magazines, comics and Gutenberg aren't handled yet. `queue add --search` queues every match of a query through the scrape API (R8), showing the count and size first and queuing only with `--yes`. Still to do in P1: catalogs (F3) and `browse` (F2), SHA-1 checks (F15c: iacore checks MD5 only), the ramp-up and concurrency above 1 (downloads run one at a time), `verify` (F17) and `refresh` (F17a).
 
 ## 10. Decisions and open questions
 

@@ -20,7 +20,7 @@ from dataclasses import replace
 from pathlib import PurePosixPath
 
 from ..select import TILE, Profile, Selection, size_of
-from .base import Handler, Plan
+from .base import Handler, Plan, clean
 
 VIDEO_EXT = {".mp4", ".m4v", ".mpeg", ".mpg", ".avi", ".mkv", ".mov", ".wmv", ".webm", ".flv", ".rm", ".ogv",
              ".m2ts", ".ts", ".vob"}
@@ -214,12 +214,6 @@ def _sub_suffix(f: dict) -> str:
 
 
 # --- names ----------------------------------------------------------------------------------------
-
-def clean(text: str) -> str:
-    """A title fit for a file name: no slashes or colons, tidy spaces."""
-    text = html.unescape(text).replace("/", "-").replace(":", " -")
-    return re.sub(r"\s+", " ", text).strip(" .-_") or "Untitled"
-
 
 def film_title(item) -> str:
     """The title for Movies/: without uploaders' tags or a repeated year, the article in front."""

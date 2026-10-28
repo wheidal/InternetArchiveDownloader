@@ -145,6 +145,18 @@ class CliTest(unittest.TestCase):
         self.assertFalse(plan_path.exists())
         self.assertEqual(Queue().get("noyear").status, "done")
 
+    def test_queue_a_search(self):  # R8: through the scrape API, with the restriction filter
+        code, out = self.run_cli("queue", "add", "--search", "film", "--kind", "movies")
+        self.assertIn("3 item(s) match", out)
+        self.assertIn("--yes", out)
+        self.assertEqual(Queue().pending(), [])
+        scrape = [c for c in self.fake.calls if "/scrape" in c]
+        self.assertIn("access-restricted-item%3Atrue", scrape[0])
+        code, out = self.run_cli("queue", "add", "--search", "film", "--yes")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(e.identifier for e in Queue().pending()), ["film", "gd77"])  # lent: refused
+        self.assertIn("lent: not queued", out)
+
     def test_a_removed_item_becomes_unavailable(self):
         self.run_cli("queue", "add", "film")
         del self.fake.items["film"]

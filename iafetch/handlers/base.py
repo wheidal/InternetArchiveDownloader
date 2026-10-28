@@ -4,7 +4,9 @@ A plan that a handler isn't sure of is written as JSON for review, the deadtag w
 carried out at once.
 """
 
+import html
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -57,3 +59,9 @@ class Handler:
 
     def process(self, plan: Plan, item, selection, config) -> Path:
         raise NotImplementedError
+
+
+def clean(text: str) -> str:
+    """A title fit for a file name: no slashes or colons, tidy spaces."""
+    text = html.unescape(text).replace("/", "-").replace(":", " -")
+    return re.sub(r"\s+", " ", text).strip(" .-_") or "Untitled"

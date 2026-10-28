@@ -15,6 +15,7 @@ from iacore.search import parse_json
 from .rights import RESTRICTED_QUERY
 
 METADATA_TTL = 7 * 24 * 3600
+SCRAPE_PAGE = 1000  # the scrape API takes 100 to 10,000 a page
 SEARCH_FIELDS = ["identifier", "title", "mediatype", "item_size", "licenseurl", "year", "downloads"]
 SORTS = {"downloads": "downloads desc", "date": "date desc", "title": "titleSorter asc", "rating": "avg_rating desc"}
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
@@ -127,6 +128,20 @@ class Archive:
         query = build_query(text, collection=collection, mediatype=mediatype, creator=creator, year=year,
                             subject=subject, license=license)
         return _first_page(query, limit, self.client.get, SORTS.get(sort, sort))[:limit]
+
+    def scrape(self, query: str, fields: list[str], *, limit: int | None = None) -> list[dict]:
+        """Every item matching `query` (restricted ones already filtered by build_query), through the scrape
+        API's cursor (R8): no 10,000 ceiling, a pause between pages."""
+        docs, cursor = [], None
+        while True:
+            params = {"q": query, "fields": ",".join(fields), "count": str(SCRAPE_PAGE)}
+            if cursor:
+                params["cursor"] = cursor
+            data = parse_json(self.client.get(f"{ARCHIVE}/services/search/v1/scrape?" + urllib.parse.urlencode(params)))
+            docs += data.get("items", [])
+            cursor = data.get("cursor")
+            if not cursor or (limit and len(docs) >= limit):
+                return docs[:limit] if limit else docs
 
     def close(self) -> None:
         if self.db:

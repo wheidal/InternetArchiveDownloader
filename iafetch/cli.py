@@ -12,7 +12,7 @@ from iacore.download import DownloadError, Throttle, parse_rate
 from iacore.http import FetchError
 
 from . import __version__, rights
-from .api import Archive, identifier_of
+from .api import Archive, build_query, identifier_of
 from .config import ConfigError, acknowledge_terms, load_config
 from .download import DiskFull, download_item
 from .handlers import choose, selection
@@ -35,12 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("search", help="find items (restricted ones are never shown)")
     s.add_argument("words", nargs="*")
-    s.add_argument("--collection")
-    s.add_argument("--kind", help="archive.org mediatype: movies, audio, texts, image, software, data, etree")
-    s.add_argument("--creator")
-    s.add_argument("--year", help="1935, or a range: 1930-1939")
-    s.add_argument("--subject")
-    s.add_argument("--license", help="pd (public domain), cc, by, any, or a licenseurl pattern")
+    _filter_args(s)
     s.add_argument("--sort", choices=["downloads", "date", "title", "rating"], default="downloads")
     s.add_argument("--limit", type=int, default=25)
 
@@ -54,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     add = qsub.add_parser("add", help="queue items, by identifier or archive.org URL")
     add.add_argument("items", nargs="*")
     add.add_argument("--from", dest="from_file", type=Path, help="a text file of identifiers or URLs, one a line")
+    add.add_argument("--search", metavar="QUERY", help="every item matching an archive.org query (with the filters "
+                     "below); shows how many and how big first, and queues them only with --yes")
+    _filter_args(add)
+    add.add_argument("--yes", action="store_true", help="with --search: queue them")
     _selection_args(add)
     qsub.add_parser("list", help="what's queued, and what happened to the rest")
     rm = qsub.add_parser("remove", help="take waiting items out of the queue")
@@ -91,6 +90,20 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
 
 
+def _filter_args(p) -> None:
+    p.add_argument("--collection")
+    p.add_argument("--kind", help="archive.org mediatype: movies, audio, texts, image, software, data, etree")
+    p.add_argument("--creator")
+    p.add_argument("--year", help="1935, or a range: 1930-1939")
+    p.add_argument("--subject")
+    p.add_argument("--license", help="pd (public domain), cc, by, any, or a licenseurl pattern")
+
+
+def _filters(args) -> dict:
+    return {"collection": args.collection or "", "mediatype": args.kind or "", "creator": args.creator or "",
+            "year": args.year or "", "subject": args.subject or "", "license": args.license or ""}
+
+
 def _selection_args(p) -> None:
     p.add_argument("--as", dest="handler", default="", help="the handler to use instead of the usual one")
     p.add_argument("--format", action="append", default=[], help='archive.org format to take, e.g. "h.264" (repeatable)')
@@ -113,9 +126,7 @@ def _archive(config, log=lambda line: None) -> Archive:
 
 def cmd_search(args, config) -> int:
     archive = _archive(config)
-    docs = archive.search(" ".join(args.words), collection=args.collection or "", mediatype=args.kind or "",
-                          creator=args.creator or "", year=args.year or "", subject=args.subject or "",
-                          license=args.license or "", sort=args.sort, limit=args.limit)
+    docs = archive.search(" ".join(args.words), sort=args.sort, limit=args.limit, **_filters(args))
     if not docs:
         print("Nothing found.")
         return EXIT_OK
@@ -212,9 +223,14 @@ def _queue_add(args, config, queue) -> int:
     if args.from_file:
         texts += [x.strip() for x in args.from_file.read_text(encoding="utf-8").splitlines()
                   if x.strip() and not x.lstrip().startswith("#")]
-    if not texts:
-        return _fail("queue what? Give identifiers or URLs, or --from a file of them")
     archive = _archive(config, log=print)
+    if args.search is not None or any(_filters(args).values()):
+        found = _search_to_queue(args, archive)
+        if found is None:
+            return EXIT_OK
+        texts += found
+    if not texts:
+        return _fail("queue what? Give identifiers or URLs, --from a file of them, or --search")
     added = 0
     for text in texts:
         identifier, one_file = identifier_of(text)
@@ -239,6 +255,28 @@ def _queue_add(args, config, queue) -> int:
             print(f"{identifier}: already queued")
     print(f"{added} added. Download with: iafetch get")
     return EXIT_OK
+
+
+def _search_to_queue(args, archive) -> list[str] | None:
+    """The identifiers a --search finds; without --yes, only what it would queue (and None)."""
+    query = build_query(args.search or "", **_filters(args))
+    docs = archive.scrape(query, ["identifier", "title", "item_size"])
+    total = sum(int(d.get("item_size") or 0) for d in docs)
+    print(f"{len(docs):,} item(s) match, {_size(total)} in all (whole items: what's downloaded is usually much "
+          f"less, only the files each handler takes).")
+    for d in docs[:10]:
+        print(f"  {d['identifier']:<40} {_size(d.get('item_size') or 0):>9}  {str(d.get('title') or '')[:60]}")
+    if len(docs) > 10:
+        print(f"  ... and {len(docs) - 10:,} more")
+    if len(docs) > LARGE_ITEMS:
+        print(f"More than {LARGE_ITEMS:,} items: archive.org asks to hear about jobs this big first "
+              f"(info@archive.org); get will need --large-job.")
+    if not args.yes:
+        if docs:
+            print("Nothing queued yet. Run it again with --yes to queue them (each item's metadata is read, "
+                  "about one a second).")
+        return None
+    return [d["identifier"] for d in docs]
 
 
 # --- get ------------------------------------------------------------------------------------------
