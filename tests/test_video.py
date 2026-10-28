@@ -159,7 +159,8 @@ class PlanTest(unittest.TestCase):
         self.assertIn("S01E01 is more than one file", plan.review[0])
 
     def test_an_unnumbered_episode_needs_review(self):
-        files = [file("Show S01E01.mp4", fmt="MPEG4"), file("Behind the scenes.mp4", fmt="MPEG4")]
+        files = [file("Show S01E01.mp4", fmt="MPEG4"), file("Show S01E02.mp4", fmt="MPEG4"),
+                 file("Behind the scenes.mp4", fmt="MPEG4")]
         plan = self.plan(item("show", files, title="Show"))
         self.assertIn("no episode number in Behind the scenes.mp4", plan.review)
 
@@ -178,3 +179,34 @@ class PlanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FilmTitleTest(unittest.TestCase):
+    def test_titles(self):
+        from iafetch.handlers.video import film_title
+        for title, date, want in (
+                ("Der schweigende Stern (1960)", "1960", "Der schweigende Stern"),
+                ("First Spaceship on Venus, The (Schweigende Stern, Der)", "1960",
+                 "The First Spaceship on Venus (Der Schweigende Stern)"),
+                ("In The Dust Of The Stars (English subs, HD)", "1976", "In The Dust Of The Stars"),
+                ("Metropolis [1080p] (1927)", "1927", "Metropolis"),
+                ("Reefer Madness", "1936", "Reefer Madness"),
+                ("Batman: The Movie", "1966", "Batman - The Movie")):
+            self.assertEqual(film_title(item("x", [], title=title, date=date)), want)
+
+    def test_an_ipod_copy_is_the_same_film(self):  # the_first_spaceship_on_venus
+        files = [file("Venus.mp4", fmt="MPEG4", size=2000), file("Venus.asr.srt", fmt="SubRip", size=48),
+                 file("Venus_512kb.mp4", "derivative", "512Kb MPEG4", size=300, original="Venus.mp4"),
+                 file("Venus_ipod.mp4", fmt="MPEG4", size=900), file("Venus_ipod.asr.srt", fmt="SubRip", size=49),
+                 file("Venus.flv", fmt="Flash Video", size=160)]
+        it = item("venus", files)
+        self.assertEqual(Video().kind(it), "movies")
+        self.assertEqual(names(selection(Video(), it, {})), ["Venus.mp4", "Venus_ipod.asr.srt"])
+
+    def test_several_unnumbered_videos_are_a_film_for_review(self):
+        it = item("x", [file("Feature.mp4", fmt="MPEG4"), file("Trailer.mp4", fmt="MPEG4")], title="Feature")
+        self.assertEqual(Video().kind(it), "movies")
+        with tempfile.TemporaryDirectory() as tmp:
+            config = parse_config({"root": tmp})
+            plan = Video().plan(it, Path(tmp) / "_Inbox" / "x", selection(Video(), it, {}, config), config)
+        self.assertIn("2 videos where one film was expected", plan.review)

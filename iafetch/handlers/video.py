@@ -29,12 +29,17 @@ MP4 = {".mp4", ".m4v"}
 H264 = ("h.264", "h.264 ia", "h.264 hd", "512kb mpeg4", "mpeg4")
 SUB_EXT = {".srt", ".vtt"}
 # Suffixes archive.org (and uploaders) give other versions of the same video
-VARIANT = re.compile(r"(?i)(\.ia|_512kb|_256kb|_64kb|_edit|_hq|_lq|_access|\.asr)$")
+VARIANT = re.compile(r"(?i)(\.ia|_512kb|_256kb|_64kb|_edit|_hq|_lq|_access|\.asr|_ipod|_iphone|_mobile|_sd|_hd|_web|"
+                     r"_small|_large)$")
 LANG = re.compile(r"(?i)\.([a-z]{2,3}(?:-[a-z]{2})?)$")
 
 EPISODE = re.compile(r"(?i)(?<!\d)s(\d{1,2})[ ._-]?e(\d{1,3})(?!\d)")
 CROSS = re.compile(r"(?i)(?<![a-z0-9])(\d{1,2})x(\d{2,3})(?!\d)")
 NUMBERED = re.compile(r"(?i)(?:^|[ _.-])(?:part|pt|ep|episode|chapter)?[ _.-]*(\d{1,3})$")
+# Uploaders' tags in a film's title: "(English subs, HD)", "[1080p]", "(Remastered)"
+TITLE_TAGS = re.compile(r"(?i)\s*[(\[][^)\]]*\b(subs?|subtitled|subtitles|untertitel|hd|1080p|720p|480p|dvdrip|"
+                        r"remaster(ed)?|restored)\b[^)\]]*[)\]]")
+ARTICLE = re.compile(r"^(.+), (The|A|An|Der|Die|Das|Le|La|Les|El)$")
 SERIES_NOISE = re.compile(r"(?i)\s*(\((mini-?series|tv series|tv)\)|\b(the )?complete series\b|\btv show\b|"
                           r"\btv series\b|\bpublic domain episodes\b|\bepisodes\b)\s*")
 
@@ -43,7 +48,10 @@ class Video(Handler):
     name = "video"
 
     def kind(self, item) -> str:
-        return "tv" if len(_groups(item.files)) > 1 else "movies"
+        """tv when the item holds several videos, most of them numbered as episodes; else one film."""
+        groups = _groups(item.files)
+        numbered = sum(1 for files in groups.values() if episode(files[0]["name"]) is not None)
+        return "tv" if len(groups) > 1 and numbered * 2 > len(groups) else "movies"
 
     def profile(self, item, config=None) -> Profile:
         return Profile(originals=False)  # the best playable copy is often archive.org's own h.264
@@ -54,7 +62,13 @@ class Video(Handler):
         groups = _groups(selection.files)
         chosen = [pick(files, quality) for files in groups.values()]
         if subs:
-            chosen += [f for f in selection.files if _is_sub(f) and (_stem(f) in groups or len(groups) == 1)]
+            kept: dict[tuple[str, str], dict] = {}  # one per video and language: e.g. not the _ipod copy's too
+            for f in selection.files:
+                if _is_sub(f) and (_stem(f) in groups or len(groups) == 1):
+                    key = (_stem(f), _sub_suffix(f))
+                    if key not in kept or size_of(f) > size_of(kept[key]):
+                        kept[key] = f
+            chosen += kept.values()
         return replace(selection, files=sorted(chosen, key=lambda f: f["name"]))
 
     def plan(self, item, staged, selection, config) -> Plan:
@@ -63,7 +77,7 @@ class Video(Handler):
         return self._film(item, staged, selection, config)
 
     def _film(self, item, staged, selection, config) -> Plan:
-        title, year = clean(item.title), item.year
+        title, year = film_title(item), item.year
         name = f"{title} ({year})" if year else title
         dest = config.inside(config.folder("movies") / name)
         plan = Plan(item.identifier, self.name, str(staged), str(dest), sidecar=_record(item, "iafetch.json"))
@@ -205,6 +219,19 @@ def clean(text: str) -> str:
     """A title fit for a file name: no slashes or colons, tidy spaces."""
     text = html.unescape(text).replace("/", "-").replace(":", " -")
     return re.sub(r"\s+", " ", text).strip(" .-_") or "Untitled"
+
+
+def film_title(item) -> str:
+    """The title for Movies/: without uploaders' tags or a repeated year, the article in front."""
+    title = TITLE_TAGS.sub("", item.title)
+    if item.year:
+        title = re.sub(rf"\s*[(\[]{item.year}[)\]]\s*$", "", title)
+    m = re.match(r"^(.*?)(\s*\(([^)]*)\))?$", title.strip())
+    main, alt = m.group(1), m.group(3)
+    main = ARTICLE.sub(r"\2 \1", main.strip())
+    if alt:
+        main += f" ({ARTICLE.sub(r'\2 \1', alt.strip())})"
+    return clean(main)
 
 
 def series_name(item) -> str:
