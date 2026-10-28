@@ -1,6 +1,6 @@
 # iafetch: Requirements and Specification
 
-*Draft 0.3, 2026-10-28.* The research behind this spec (terms of use, API limits, collection survey, item anatomy) is in [RESEARCH.md](RESEARCH.md). The review of existing downloaders is in [PRIOR_ART.md](PRIOR_ART.md). Requirements taken from it are marked *(prior art)*.
+*Draft 0.3, 2026-10-28. Phase 1 is under way: see §9.* The research behind this spec (terms of use, API limits, collection survey, item anatomy) is in [RESEARCH.md](RESEARCH.md). The review of existing downloaders is in [PRIOR_ART.md](PRIOR_ART.md). Requirements taken from it are marked *(prior art)*.
 
 ## 1. Overview
 
@@ -310,12 +310,14 @@ iafetch catalog update [name]
 | **P3: Reading and listening** | audiobook (M4B), texts (PDF/EPUB/OPF, comics, magazines) | A LibriVox book plays in Audiobookshelf with chapters; a scanned book imports into Calibre with metadata |
 | **P4: The rest** | software, images, torrent offload, TUI, dashboard | |
 
+**P1 so far (2026-10-28):** `config` (R21, R22), `net` (R1-R7, R13), `api` (metadata cache, search with the restriction filter, F5), `select` (R10, R11, F7), `download` (F15, F15b, F15d, F16), `queue` (SQLite), `rights` (R14, R16-R18), the generic and deadtag handlers, and `search`, `show`, `queue`, `get` (with R19), `process`, `status`, `terms`. Still to do in P1: catalogs (F3) and `browse` (F2), SHA-1 checks (F15c: iacore checks MD5 only), the ramp-up and concurrency above 1 (downloads run one at a time), `verify` (F17) and `refresh` (F17a).
+
 ## 10. Decisions and open questions
 
 Decided (2026-10-28):
 
 - **Video first.** The first media handler is `video` (films and TV for Jellyfin). Music comes after.
-- **Shared code is [iacore](https://github.com/wheidal/iacore)**, a separate public package (MIT) holding deadfetch's download engine. deadfetch uses it (DeadShowTagger branch `iacore-engine`), and iafetch builds on it.
+- **Shared code is [iacore](https://github.com/wheidal/iacore)**, a separate public package (MIT) holding deadfetch's download engine. deadfetch uses it (merged into DeadShowTagger `main` at `ba79e3b`), and iafetch builds on it.
 - **Our own client, not the official `internetarchive` library.** That library has no bandwidth cap, shared rate limiter or concurrency control, the parts that matter most here. Copy its good details instead (`cnt=0`, path guard, on-the-fly names, mtime skip; see [PRIOR_ART.md](PRIOR_ART.md)). Still read credentials from `ia.ini`, so they work with the official `ia` tool.
 - **deadfetch's three gaps are fixed** (`cnt=0`, the `Content-Range` check, restarting on a 416), in DeadShowTagger `b612ca3`.
 - **Everything goes under `/mnt/synology/InternetArchive`**, one subfolder per kind (§7, R21, R22).

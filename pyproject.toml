@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iafetch"
+version = "0.1.0"
+description = "Find, download, verify and file media from the Internet Archive, politely"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    # The download engine shared with deadfetch; pinned to a release on GitHub (it isn't on PyPI)
+    "iacore @ git+https://github.com/wheidal/iacore@v0.1.1",
+]
+
+[project.scripts]
+iafetch = "iafetch.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/wheidal/InternetArchiveDownloader"
+
+[tool.setuptools]
+packages = ["iafetch", "iafetch.handlers"]
