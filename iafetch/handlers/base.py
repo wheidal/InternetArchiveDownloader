@@ -46,6 +46,10 @@ class Handler:
         """The library folder the item goes in (a key of Config.library)."""
         return "other"
 
+    def prepare(self, item, archive) -> None:
+        """Look up what planning needs beyond the item itself (e.g. a magazine's name, from its collection), and
+        keep it on the item. Called before plan wherever a plan is made; requests go through `archive`."""
+
     def profile(self, item, config=None) -> Profile:
         return Profile()
 

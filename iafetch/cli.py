@@ -193,11 +193,11 @@ def cmd_search(args, config) -> int:
 def cmd_show(args, config) -> int:
     identifier, _ = identifier_of(args.item)
     item = _archive(config).item(identifier, refresh=args.refresh)
-    print("\n".join(show_lines(item, config, _options(args), args.handler)))
+    print("\n".join(show_lines(item, config, _options(args), args.handler, archive=_archive(config))))
     return EXIT_OK
 
 
-def show_lines(item, config, options: dict | None = None, handler_name: str = "") -> list[str]:
+def show_lines(item, config, options: dict | None = None, handler_name: str = "", archive=None) -> list[str]:
     """What `iafetch show` prints about an item: its metadata, license, handler, the files it would take and
     where they'd be filed. The terminal UI's item view shows the same."""
     out: list[str] = []
@@ -235,6 +235,8 @@ def show_lines(item, config, options: dict | None = None, handler_name: str = ""
     for n in notes:
         say(f"  {n}")
     if sel.files and handler.name != "generic":
+        if archive is not None:
+            handler.prepare(item, archive)
         plan = handler.plan(item, config.inbox / identifier, sel, config)
         moves = [m for m in plan.moves if not m[1].startswith(".iafetch/")]
         say(f"\n  filed as ({plan.dest}):")
@@ -591,6 +593,7 @@ def _get_one(e: Entry, config, archive, inbox: Path, throttle, progress, no_proc
         from .handlers.texts import manual_plan
         plan = manual_plan(item, staged_folder, sel, config, game_entry.result)
     else:
+        handler.prepare(item, archive)
         plan = handler.plan(item, staged_folder, sel, config)
     if plan.review:
         path = plan.write(inbox)
@@ -632,7 +635,9 @@ def cmd_process(args, config) -> int:
         plan = None
     entry = Queue().get(item.identifier)
     sel = selection(handler, item, entry.options if entry else {}, config)
-    plan = plan or handler.plan(item, inbox / item.identifier, sel, config)
+    if plan is None:
+        handler.prepare(item, archive)
+        plan = handler.plan(item, inbox / item.identifier, sel, config)
     if plan.review and not plan.approved:
         return _fail(f"{item.identifier} needs review: {'; '.join(plan.review)}. See {plan.write(inbox)}")
     dest = handler.process(plan, item, sel, config)

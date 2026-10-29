@@ -375,7 +375,7 @@ class ItemScreen(ModalScreen[bool | None]):
         from ..cli import show_lines
         try:
             item = self.app.archive.item(self.identifier)
-            text = "\n".join(show_lines(item, self.app.config))
+            text = "\n".join(show_lines(item, self.app.config, archive=self.app.archive))
         except Exception as exc:
             text = f"{self.identifier}: {exc}"
         self.app.call_from_thread(self.query_one("#itemtext", Static).update, Text(text))

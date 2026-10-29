@@ -1,4 +1,4 @@
-"""Books and manuals (§6.8), filed the way Calibre imports them.
+"""Books, manuals and magazines (§6.8): books filed the way Calibre imports them, magazines by title and year.
 
 A scanned book on archive.org comes as page images (a JP2 zip, hundreds of MB) plus what archive.org derives
 from them: a searchable PDF, an OCR'd EPUB, plain text. The handler takes the reading copy, not the scans:
@@ -12,6 +12,14 @@ and files it as
     Books/{author}/{title} ({year})/{title} ({year}).pdf    with metadata.opf and cover.jpg
 
 which Calibre's "Add books from folders" reads. The item's records go in a hidden .iafetch/<identifier>/.
+
+A magazine (an item in archive.org's magazine_rack collections) is one issue, filed by the magazine it belongs to
+(the most specific of its collections, looked up once and cached) and its year:
+
+    Magazines/ZZap!64 Magazine/1985/ZZap!64 Magazine - Issue 001 (1985-05).pdf
+
+The issue number comes from the item's issue field or its title, the month from its date or title. Only when
+nothing tells one issue from another does it go to review.
 """
 
 import re
@@ -36,7 +44,11 @@ class Texts(Handler):
     name = "texts"
 
     def kind(self, item) -> str:
-        return "books"
+        return "magazines" if is_magazine(item) else "books"
+
+    def prepare(self, item, archive) -> None:
+        if is_magazine(item) and SERIES_KEY not in item.raw:
+            item.raw[SERIES_KEY] = magazine_name(item, archive)
 
     def profile(self, item, config=None) -> Profile:
         return Profile(originals=False)  # the searchable PDF is often a derivative
@@ -53,6 +65,8 @@ class Texts(Handler):
         return replace(selection, files=sorted(chosen, key=lambda f: f["name"]))
 
     def plan(self, item, staged, selection, config) -> Plan:
+        if is_magazine(item):
+            return magazine_plan(item, staged, selection, config)
         title, year, author = book_title(item), item.year, author_of(item)
         name = _short(f"{title} ({year})" if year else title)
         dest = config.inside(config.folder("books") / _short(author) / name)
@@ -215,5 +229,121 @@ def manual_plan(item, staged, selection, config, game_folder) -> Plan:
         plan.moves.append([TILE, f".iafetch/{item.identifier}/{TILE}"])
     if not selection.files:
         plan.review.append("no PDF or EPUB to take (try --as generic)")
+    plan.approved = not plan.review
+    return plan
+
+
+
+# --- magazines ---------------------------------------------------------------------------------------------
+
+MAGAZINE_ROOT = "magazine_rack"  # archive.org's collection of periodicals; every magazine item lists it
+SERIES_KEY = "_iafetch_magazine"  # where prepare() keeps the magazine's name on the item
+ISSUE = re.compile(r"(?i)(?:\b(?:issue|no\.?|nr\.?|number|ausgabe|numero)|#)\s*(\d{1,4})\b")
+MONTHS = {name: n for n, names in enumerate((
+    ("january", "jan", "januar", "janvier", "gennaio"), ("february", "feb", "februar", "fevrier", "febbraio"),
+    ("march", "mar", "märz", "maerz", "mars", "marzo"), ("april", "apr", "avril", "aprile"),
+    ("may", "mai", "maggio"), ("june", "jun", "juni", "juin", "giugno"), ("july", "jul", "juli", "juillet", "luglio"),
+    ("august", "aug", "aout", "agosto"), ("september", "sep", "sept", "settembre"),
+    ("october", "oct", "oktober", "octobre", "ottobre"), ("november", "nov", "novembre"),
+    ("december", "dec", "dezember", "decembre", "dicembre")), 1) for name in names}
+YEAR = r"(1[89]\d\d|20\d\d)"
+MONTH_FORMS = (  # (pattern, which group is the year, which the month)
+    (re.compile(rf"\b{YEAR}[-/._](0[1-9]|1[0-2])(?!\d)"), 1, 2),  # 1985-05, 1984_04
+    (re.compile(rf"(?<!\d)(0?[1-9]|1[0-2])[ ./_-]{YEAR}\b"), 2, 1),  # 10 1987, 05/1985
+    (re.compile(rf"(?i)\b({'|'.join(sorted(MONTHS, key=len, reverse=True))})\.?,?\s+{YEAR}\b"), 2, 1),  # February 1951
+)
+VOLUME = re.compile(r"(?i)\bvol(?:ume)?\.?\s*(\d{1,4})\b")
+TITLE_ISSUE = re.compile(r"(?i)\s*(?:[-:,]\s*)?(?:\b(?:issue|no\.?|nr\.?|number|vol\.?|volume|#)\s*\d+.*|"
+                         r"\b(?:1[89]\d\d|20\d\d)\b.*|\(.*\)\s*)$")
+
+
+def is_magazine(item) -> bool:
+    return MAGAZINE_ROOT in item.collections
+
+
+def magazine_name(item, archive) -> str:
+    """The magazine an issue belongs to: the title of the most specific of its collections (one that isn't a
+    parent of another), e.g. "ZZap!64 Magazine" rather than "Commodore Computer Periodicals". Falls back on
+    the issue's title without its number or date."""
+    candidates = [c for c in item.collections if c != MAGAZINE_ROOT and not c.startswith("fav-")]
+    found: dict[str, tuple[str, list[str]]] = {}
+    for c in candidates:
+        try:
+            coll = archive.item(c)
+        except Exception:  # the network, a missing collection: do without it
+            continue
+        found[c] = (coll.title, coll.collections)
+    leaves = [c for c in found if not any(c in parents for o, (_, parents) in found.items() if o != c)]
+    if leaves:
+        return clean(re.sub(r"(?i)\s+(archive|collection)$", "", found[leaves[0]][0].strip()))
+    return title_series(item.title)
+
+
+def title_series(title: str) -> str:
+    """ "ZZap!64 Magazine Issue 001" -> "ZZap!64 Magazine"; "64'er 1984-04" -> "64'er"."""
+    return clean(TITLE_ISSUE.sub("", title)) or clean(title)
+
+
+def issue_of(item) -> int | None:
+    """The issue number: the item's issue field, else "Issue 12", "No. 12" or "#12" in its title."""
+    m = re.search(r"\d{1,4}", item.field("issue"))
+    if m:
+        return int(m.group(0))
+    m = ISSUE.search(item.title)
+    return int(m.group(1)) if m else None
+
+
+def volume_of(item) -> int | None:
+    """The volume: the item's volume field, else "Vol. 3" or "Volume 03" in its title."""
+    m = re.search(r"\d{1,4}", item.field("volume"))
+    if m:
+        return int(m.group(0))
+    m = VOLUME.search(item.title)
+    return int(m.group(1)) if m else None
+
+
+def month_of(item) -> str:
+    """ "1985-05" from the date, the title or the identifier ("1985-05", "10 1987", "February 1951"); "" if
+    only a year (or nothing) is known."""
+    for text in (item.field("date"), ISSUE.sub(" ", item.title), item.identifier):  # "Issue 10 1985" isn't October
+        for pattern, y, m in MONTH_FORMS:
+            found = pattern.search(text)
+            if found:
+                month = found.group(m)
+                month = MONTHS[month.lower()] if month.lower() in MONTHS else int(month)
+                return f"{found.group(y)}-{month:02d}"
+    return ""
+
+
+def magazine_plan(item, staged, selection, config) -> Plan:
+    from pathlib import Path
+    series = item.raw.get(SERIES_KEY) or title_series(item.title)
+    issue, volume, month = issue_of(item), volume_of(item), month_of(item)
+    year = item.year or month[:4] or (re.search(rf"\b{YEAR}\b", item.title) or [None, ""])[1]
+    if issue is not None and volume is not None:  # numbers restart each volume
+        name = f"{series} - Vol. {volume:02d} No. {issue:02d}" + (f" ({month})" if month else "")
+    elif issue is not None:
+        name = f"{series} - Issue {issue:03d}" + (f" ({month})" if month else "")
+    elif month:
+        name = f"{series} - {month}"
+    else:
+        name = clean(item.title)
+    folder = config.folder("magazines") / _short(series)
+    dest = config.inside(folder / year if year else folder)
+    plan = Plan(item.identifier, "texts", str(staged), str(dest), sidecar=f".iafetch/{item.identifier}/iafetch.json")
+    name = _short(name)
+    for f in selection.files:
+        own = name if len(selection.files) == 1 else _short(clean(PurePosixPath(f["name"]).stem))
+        if (dest / (own + _ext(f))).exists():  # another scan of the same issue: keep both
+            own = f"{own} [{item.identifier}]"
+        plan.moves.append([f["name"], own + _ext(f)])
+    for f in selection.record:
+        plan.moves.append([f["name"], f".iafetch/{item.identifier}/{PurePosixPath(f['name']).name}"])
+    if selection.tile:
+        plan.moves.append([TILE, f".iafetch/{item.identifier}/{TILE}"])
+    if not selection.files:
+        plan.review.append("no PDF or EPUB to take (try --as generic)")
+    if issue is None and not month and not year:
+        plan.review.append("nothing tells which issue this is (no issue number or date): name it in the plan")
     plan.approved = not plan.review
     return plan
