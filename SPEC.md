@@ -334,3 +334,10 @@ Still open:
    - **Live music: the general etree code lives in iafetch (decided 2026-10-29, replacing the earlier plan).** DeadShowTagger stays Grateful-Dead-specific and unchanged; iafetch gets its own live-music library (`iafetch/livemusic/`), adapted from deadtag's general parts (info .txt parser, track labels and shnids, checksum files, matching titles to tracks, plans and review, SHN to FLAC, tagging) and deadfetch's ranking, with the band taken from each item. The two projects share no code beyond iacore; some duplication is accepted to keep them independent.
    - **Studio music: written fresh in iafetch** with mutagen (tags) and Pillow (covers) as an optional extra: FLAC else MP3 (never both, never the album zip too), fill missing tags from metadata, cover, license tags, `Music/{artist}/{year} - {album}/`; 78s with the restored FLAC and the label scan.
    - **Order within music:** studio music first (it builds the shared tagging groundwork), then live music. Before either, look at real items from a few etree bands, netlabels and 78s, as for video and magazines.
+
+5. **Gaps found in a survey of archive.org (2026-10-29), to do in this order.** Every downloadable media type reaches a handler (web crawls are out of scope; 505 k index entries without a media type aren't items), but some large areas only get the generic handler or nothing useful:
+   1. **Project Gutenberg** (59 k items): the texts handler finds no PDF and takes nothing. Take Gutenberg's own EPUB (37 k have one; not made from scans), else its HTML or plain text.
+   2. **Comics** (118 k; 58 k with CBZ/CBR): filed as books from the PDF. Prefer CBZ/CBR, file under `Comics/{series}/`, write `ComicInfo.xml`.
+   3. **Podcasts** (1.3 M) and episodic spoken word (talks, sermons, ~2.8 M): generic. Treat as series of episodes, as radio: `Podcasts/{show}/{year}/`.
+   4. **Images** (5.7 M: museum collections, maps): generic. The image handler of §6.10: by collection, with title and description kept with each image.
+   Community Audio (3.1 M, a mix of everything) stays generic unless a later pass can tell what each item is.
