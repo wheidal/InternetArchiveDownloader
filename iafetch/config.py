@@ -43,7 +43,8 @@ LIBRARY = {
 }
 HANDLERS = {"GratefulDead": "deadtag", "librivoxaudio": "audiobook", "audio_bookspoetry": "audiobook",
             "audiolibrary": "audiobook", "gutenberg-audiobooks": "audiobook", "audio_poetry": "audiobook",
-            "oldtimeradio": "radio", "radioprograms": "radio"}
+            "oldtimeradio": "radio", "radioprograms": "radio",
+            "netlabels": "music", "georgeblood": "music", "78rpm": "music", "audio_music": "music"}
 
 
 class ConfigError(Exception):

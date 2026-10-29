@@ -29,7 +29,7 @@ from dataclasses import replace
 from pathlib import PurePosixPath
 
 from ..select import TILE, Profile, Selection, size_of
-from .base import Handler, Plan, clean
+from .base import Handler, Plan, clean, collection_title
 
 PDF_FORMATS = ("text pdf", "additional text pdf", "pdf", "image container pdf")  # most wanted first
 EPUB_FORMATS = ("epub",)
@@ -265,18 +265,7 @@ def magazine_name(item, archive) -> str:
     """The magazine an issue belongs to: the title of the most specific of its collections (one that isn't a
     parent of another), e.g. "ZZap!64 Magazine" rather than "Commodore Computer Periodicals". Falls back on
     the issue's title without its number or date."""
-    candidates = [c for c in item.collections if c != MAGAZINE_ROOT and not c.startswith("fav-")]
-    found: dict[str, tuple[str, list[str]]] = {}
-    for c in candidates:
-        try:
-            coll = archive.item(c)
-        except Exception:  # the network, a missing collection: do without it
-            continue
-        found[c] = (coll.title, coll.collections)
-    leaves = [c for c in found if not any(c in parents for o, (_, parents) in found.items() if o != c)]
-    if leaves:
-        return clean(re.sub(r"(?i)\s+(archive|collection)$", "", found[leaves[0]][0].strip()))
-    return title_series(item.title)
+    return collection_title(item, archive, {MAGAZINE_ROOT}) or title_series(item.title)
 
 
 def title_series(title: str) -> str:

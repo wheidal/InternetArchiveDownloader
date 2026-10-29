@@ -4,12 +4,13 @@ rule, then generic. Rules naming a handler that isn't built yet fall back to gen
 from .audiobook import Audiobook
 from .deadtag import Deadtag
 from .generic import Generic
+from .music import Music
 from .radio import Radio
 from .software import Software
 from .texts import Texts
 from .video import Video
 
-HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software(), Audiobook(), Radio())}
+HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software(), Audiobook(), Radio(), Music())}
 MEDIATYPES = {"movies": "video", "texts": "texts", "software": "software"}  # mediatype -> handler
 
 

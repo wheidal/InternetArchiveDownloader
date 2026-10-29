@@ -73,3 +73,21 @@ def clean(text: str) -> str:
     """A title fit for a file name: no slashes or colons, tidy spaces."""
     text = html.unescape(text).replace("/", "-").replace(":", " -")
     return re.sub(r"\s+", " ", text).strip(" .-_") or "Untitled"
+
+
+def collection_title(item, archive, ignore: set[str] = frozenset()) -> str:
+    """The title of the most specific of an item's collections (one that isn't a parent of another), e.g.
+    "ZZap!64 Magazine" rather than "Commodore Computer Periodicals", or a netlabel's "Bad Panda Records". Each
+    collection is looked up once (and cached). "" if none can be found."""
+    candidates = [c for c in item.collections if c not in ignore and not c.startswith("fav-")]
+    found: dict[str, tuple[str, list[str]]] = {}
+    for c in candidates:
+        try:
+            coll = archive.item(c)
+        except Exception:  # the network, a missing collection: do without it
+            continue
+        found[c] = (coll.title, coll.collections)
+    leaves = [c for c in found if not any(c in parents for o, (_, parents) in found.items() if o != c)]
+    if not leaves:
+        return ""
+    return clean(re.sub(r"(?i)\s+(archive|collection)$", "", found[leaves[0]][0].strip()))

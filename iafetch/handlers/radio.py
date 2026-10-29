@@ -13,11 +13,11 @@ Episodes are chosen with --episodes 1-52 or --years 1952-1953. With mutagen inst
 file is tagged: album = series, title, date, track = episode number; the processed files' MD5s go in the record.
 """
 
-import hashlib
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
+from .. import tags
 from ..select import TILE, Profile, Selection
 from .base import Handler, Plan, clean
 
@@ -229,9 +229,7 @@ def parse_ranges(text: str) -> set[int] | None:
 def tag_episodes(plan: Plan, item, selection: Selection, dest: Path) -> int:
     """Tag the filed episodes (album = series, title, date, track = episode), if mutagen is installed, and
     record the tagged files' MD5s. How many were tagged."""
-    try:
-        from mutagen import File as AudioFile
-    except ImportError:
+    if not tags.available():
         return 0
     series = series_name(item)
     by_name = {f["name"]: f for f in selection.files}
@@ -242,30 +240,10 @@ def tag_episodes(plan: Plan, item, selection: Selection, dest: Path) -> int:
         if f is None or not path.is_file():
             continue
         ep = episode(f, series, item)
-        try:
-            audio = AudioFile(path, easy=True)
-            if audio is None:
-                continue
-            if audio.tags is None:
-                audio.add_tags()
-            audio["album"] = series
-            audio["artist"] = series
-            audio["title"] = ep.title or path.stem
-            audio["genre"] = "Old Time Radio"
-            if ep.date:
-                audio["date"] = ep.date
-            if ep.number is not None:
-                audio["tracknumber"] = str(ep.number)
-            audio.save()
-        except Exception:  # a file mutagen can't write: leave it as it came
-            continue
-        processed[rel] = hashlib.md5(path.read_bytes()).hexdigest()
-    if processed:
-        import json
-        side = dest / plan.sidecar
-        record = json.loads(side.read_text(encoding="utf-8"))
-        record["processed"] = processed
-        side.write_text(json.dumps(record, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        if tags.write(path, {"album": series, "artist": series, "title": ep.title or path.stem, "genre": "Old Time Radio",
+                             "date": ep.date, "tracknumber": "" if ep.number is None else str(ep.number)}):
+            processed[rel] = tags.md5(path)
+    tags.record_processed(dest / plan.sidecar, processed)
     return len(processed)
 
 
