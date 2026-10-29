@@ -1,14 +1,18 @@
 """The downloads dashboard: a page about the downloads, served from this machine and kept current.
 
 The page asks /data.json for a fresh snapshot every few seconds: the status file a running `get` writes and
-the queue (what's waiting, what was filed where, what needs you). It only watches; starting, pausing and
-queuing stay in the CLI. The library numbers walk the folders on the NAS, so they're worked out at start and
+the queue (what's waiting, what was filed where, what needs you). Served on this computer only, it also has
+Start and Stop buttons (as `iafetch start`/`stop`); opened to the home network (--lan) it only watches.
+Queuing stays in the CLI. The library numbers walk the folders on the NAS, so they're worked out at start and
 every LIBRARY_EVERY seconds, not on every request. Covers of filed items are served from their folders.
 """
 
 import json
 import os
+import secrets
 import shutil
+import subprocess
+import sys
 import sqlite3
 import threading
 import time
@@ -16,6 +20,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import control
 from .progress import read_status, running, time_left
 from .queue import DONE, FAILED, HANDED, PENDING, REVIEW, UNAVAILABLE, Queue, data_dir
 from .rights import SIDECAR
@@ -91,7 +96,7 @@ def _folder_kind(config, result: str) -> str:
     return ""
 
 
-def snapshot(config, lib: dict | None = None, kinds: Kinds | None = None) -> dict:
+def snapshot(config, lib: dict | None = None, kinds: Kinds | None = None, writes: bool = False) -> dict:
     """Everything the page shows, as of now."""
     s = read_status()
     live = running(s)
@@ -127,6 +132,7 @@ def snapshot(config, lib: dict | None = None, kinds: Kinds | None = None) -> dic
         "needs": [dict(row(e), why=e.error) for e in finished if e.status in (REVIEW, FAILED)],
         "counts": {k: sum(1 for e in entries if e.status == k) for k in (DONE, REVIEW, FAILED, UNAVAILABLE, HANDED)},
         "library": lib,
+        "control": {"writes": writes, "stop_after": bool(live and control.stop_after_requested(int(s["pid"])))},
     }
 
 
@@ -151,11 +157,12 @@ def cover(config, identifier: str) -> Path | None:
     return None
 
 
-def page(data: dict, *, live: bool) -> str:
+def page(data: dict, *, live: bool, token: str = "") -> str:
     """The whole page, with `data` inside it. A live page then keeps itself current from /data.json."""
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     body = (TEMPLATE.read_text(encoding="utf-8").replace("__DATA__", blob)
-            .replace("__LIVE__", "true" if live else "false").replace("__REFRESH__", str(REFRESH * 1000)))
+            .replace("__LIVE__", "true" if live else "false").replace("__REFRESH__", str(REFRESH * 1000))
+            .replace("__TOKEN__", json.dumps(token)))
     return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
             + body + "\n</html>\n")
@@ -164,8 +171,12 @@ def page(data: dict, *, live: bool) -> str:
 class Dashboard:
     """The data behind the served page: a fresh snapshot per request, the library refreshed in the background."""
 
-    def __init__(self, config):
+    def __init__(self, config, writes: bool = False, starter=None):
+        """writes: the page may start and stop the download (only when served on this computer)."""
         self.config = config
+        self.writes = writes
+        self.token = secrets.token_urlsafe(18)  # only pages this dashboard served can start or stop
+        self.starter = starter or _start
         self.lib: dict | None = None
         self.kinds = Kinds()
         self._stop = threading.Event()
@@ -189,7 +200,16 @@ class Dashboard:
         self._stop.set()
 
     def snapshot(self) -> dict:
-        return snapshot(self.config, self.lib, self.kinds)
+        return snapshot(self.config, self.lib, self.kinds, self.writes)
+
+    def act(self, action: str, body: dict) -> dict:
+        if action == "stop":
+            ok, message = control.stop(after_current=bool(body.get("after")))
+        elif running(read_status()):
+            ok, message = False, "A download is already running."
+        else:
+            ok, message = self.starter()
+        return {"ok": ok, "message": message}
 
     def server(self, host: str = "127.0.0.1", port: int = PORT) -> ThreadingHTTPServer:
         dash = self
@@ -198,7 +218,8 @@ class Dashboard:
             def do_GET(self):  # noqa: N802 (the http.server name)
                 path = self.path.split("?", 1)[0]
                 if path in ("/", "/index.html"):
-                    self._send(page(dash.snapshot(), live=True).encode(), "text/html; charset=utf-8")
+                    self._send(page(dash.snapshot(), live=True, token=dash.token if dash.writes else "").encode(),
+                               "text/html; charset=utf-8")
                 elif path == "/data.json":
                     self._send(json.dumps(dash.snapshot(), separators=(",", ":")).encode(), "application/json")
                 elif path.startswith("/cover/"):
@@ -209,6 +230,25 @@ class Dashboard:
                     self._send(image.read_bytes(), IMAGE_TYPES[image.suffix.lower()], cache="max-age=3600")
                 else:
                     self.send_error(404)
+
+            def do_POST(self):  # noqa: N802
+                path = self.path.split("?", 1)[0]
+                if path not in ("/api/start", "/api/stop"):
+                    self.send_error(404)
+                    return
+                origin = self.headers.get("Origin")
+                if (not dash.writes or self.headers.get("X-Iafetch-Token") != dash.token
+                        or (origin and origin.split("://", 1)[-1] != self.headers.get("Host"))):
+                    self._send(json.dumps({"ok": False, "message": "this page can't start or stop downloads"}).encode(),
+                               "application/json", 403)
+                    return
+                try:
+                    length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                    body = body if isinstance(body, dict) else {}
+                except ValueError:
+                    body = {}
+                self._send(json.dumps(dash.act(path.removeprefix("/api/"), body)).encode(), "application/json")
 
             def _send(self, body: bytes, kind: str, code: int = 200, cache: str = "no-store") -> None:
                 self.send_response(code)
@@ -222,3 +262,11 @@ class Dashboard:
                 pass
 
         return ThreadingHTTPServer((host, port), Handler)
+
+
+def _start() -> tuple[bool, str]:
+    """`iafetch start`, as from the command line (with all its checks); (started, what it said)."""
+    done = subprocess.run([sys.executable, "-m", "iafetch", "start"], capture_output=True, text=True, timeout=120,
+                          stdin=subprocess.DEVNULL)
+    said = (done.stdout + done.stderr).strip().removeprefix("iafetch: ")
+    return done.returncode == 0, said.splitlines()[0] if said else ("Started." if done.returncode == 0 else "It didn't start.")

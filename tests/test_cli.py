@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -174,6 +175,20 @@ class CliTest(CliBase):
             code, out = self.run_cli("get")
         self.assertIn("== noyear", out)
         self.assertEqual(Queue().pending(), [])
+
+    def test_stop_after_the_current_item(self):
+        self.fake.add("noyear", [file("noyear.mp4", fmt="MPEG4")], date="", title="Mystery", mediatype="data")
+        self.run_cli("queue", "add", "film", "noyear", "--as", "generic")
+        real = cli._get_one
+
+        def get_one(e, *a, **kw):
+            cli.control.request_stop_after(os.getpid())  # iafetch stop --after-current, from another terminal
+            return real(e, *a, **kw)
+        with mock.patch.object(cli, "_get_one", get_one):
+            code, out = self.run_cli("get")
+        self.assertIn("Stopping here, as asked", out)
+        self.assertEqual([e.identifier for e in Queue().pending()], ["noyear"])
+        self.assertEqual(Queue().get("film").status, "done")
 
     def test_a_removed_item_becomes_unavailable(self):
         self.run_cli("queue", "add", "film")

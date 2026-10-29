@@ -1,11 +1,9 @@
 """iafetch command line: search archive.org, look at items, queue them, download and file them."""
 
 import argparse
-import os
 import re
 import signal
 import socket
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -13,7 +11,7 @@ from pathlib import Path
 from iacore.download import DownloadError, Throttle, parse_rate
 from iacore.http import FetchError
 
-from . import __version__, rights
+from . import __version__, control, rights
 from .api import Archive, build_query, identifier_of
 from .config import ConfigError, acknowledge_terms, load_config
 from .download import DiskFull, download_item
@@ -70,14 +68,14 @@ def main(argv: list[str] | None = None) -> int:
     qsub.add_parser("clear", help="remove everything still waiting")
 
     get = sub.add_parser("get", help="download the queue, filing each item in the library")
-    get.add_argument("--limit", type=int, help="at most this many items")
-    get.add_argument("--max-size", help="stop before passing about this much, e.g. 50G")
-    get.add_argument("--rate", help="bandwidth cap, e.g. 4M, or none (default: rate in the config)")
-    get.add_argument("--no-process", action="store_true", help="download into the inbox only; don't file")
+    _run_args(get)
     get.add_argument("--dry-run", action="store_true", help="list what would be downloaded")
     get.add_argument("--background", action="store_true", help="run detached; follow it with iafetch status")
-    get.add_argument("--large-job", action="store_true", help=f"go ahead with more than {_size(LARGE_BYTES)} or "
-                     f"{LARGE_ITEMS:,} items (write to info@archive.org first)")
+
+    start = sub.add_parser("start", help="download the queue in the background (iafetch get --background)")
+    _run_args(start)
+    stop = sub.add_parser("stop", help="stop the background download; iafetch start resumes it")
+    stop.add_argument("--after-current", action="store_true", help="let the item it's on finish and be filed first")
 
     proc = sub.add_parser("process", help="file a downloaded item from the inbox (after reviewing its plan)")
     proc.add_argument("item", help=f"identifier, or its {PLAN_SUFFIX} file")
@@ -116,6 +114,15 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\nStopped. A download in progress resumes where it left off next time.", file=sys.stderr)
         return EXIT_ERROR
+
+
+def _run_args(p) -> None:
+    p.add_argument("--limit", type=int, help="at most this many items")
+    p.add_argument("--max-size", help="stop before passing about this much, e.g. 50G")
+    p.add_argument("--rate", help="bandwidth cap, e.g. 4M, or none (default: rate in the config)")
+    p.add_argument("--no-process", action="store_true", help="download into the inbox only; don't file")
+    p.add_argument("--large-job", action="store_true", help=f"go ahead with more than {_size(LARGE_BYTES)} or "
+                   f"{LARGE_ITEMS:,} items (write to info@archive.org first)")
 
 
 def _filter_args(p) -> None:
@@ -406,6 +413,9 @@ def cmd_get(args, config) -> int:
                 progress.grow(len(pending), sum(x.size for x in pending))
             if not pending:
                 break
+            if control.stop_after_requested():
+                say("\nStopping here, as asked (iafetch stop --after-current). iafetch start carries on.")
+                break
             e = pending.pop(0)
             tried.add(e.identifier)
             n += 1
@@ -598,7 +608,7 @@ def _years(text: str) -> tuple[int, int]:
 
 def cmd_dashboard(args, config) -> int:
     from . import dashboard as dashboard_mod
-    dash = dashboard_mod.Dashboard(config)
+    dash = dashboard_mod.Dashboard(config, writes=not args.lan)
     if args.html:
         dash.refresh_library()
         path = args.html.expanduser()
@@ -614,8 +624,9 @@ def cmd_dashboard(args, config) -> int:
     dash.keep_library_fresh()
     where = f"http://{socket.gethostname()}:{args.port}  (on the home network)" if args.lan else \
         f"http://localhost:{args.port}"
-    print(f"The downloads dashboard is at {where}\nIt refreshes itself every {dashboard_mod.REFRESH} s. "
-          "Ctrl-C stops it (downloads carry on).", flush=True)
+    print(f"The downloads dashboard is at {where}\nIt refreshes itself every {dashboard_mod.REFRESH} s"
+          + ("; on the home network it only watches (Start and Stop are on this computer's page)" if args.lan else "")
+          + ". Ctrl-C stops it (downloads carry on).", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -635,15 +646,18 @@ def cmd_status(args, config) -> int:
         return EXIT_OK
     if running(s):
         cap = f", capped at {_size(s['rate'])}/s" if s.get("rate") else ", no rate cap"
-        print(f"iafetch get is running (process {s['pid']}, started {_clock(s['started'])}{cap}).")
+        print(f"iafetch get is running (process {s['pid']}, started {_clock(s['started'])}{cap}). "
+              f"Stop it with: iafetch stop")
         print(f"  item {s['item']} of {s['items']}: {s['identifier']}")
         if s.get("name"):
             size = f" of {_size(s['file_size'])}" if s.get("file_size") else ""
             print(f"  file {s['file']} of {s['files']}: {s['name']}, {_size(s['file_done'])}{size}")
         print(f"  this run: {s['got']} done, {s['failed']} failed, {_size(s['bytes'])} downloaded")
+        if control.stop_after_requested(int(s["pid"])):
+            print("  it will stop when this item is filed (iafetch stop --after-current)")
     else:
         print(f"No get running. The last one {s.get('state', 'ended')} at {_clock(s.get('updated', 0))}: "
-              f"{s.get('got', 0)} done, {s.get('failed', 0)} failed.")
+              f"{s.get('got', 0)} done, {s.get('failed', 0)} failed. Start one with: iafetch start")
     print(f"{len(Queue().pending())} waiting in the queue.")
     return EXIT_OK
 
@@ -685,18 +699,22 @@ def _start_background(args) -> int:
             argv += [flag, str(value)]
     argv += ["--no-process"] if args.no_process else []
     argv += ["--large-job"] if args.large_job else []
-    log = log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "a", encoding="utf-8") as out:
-        out.write(f"\n--- iafetch {' '.join(argv)}, started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-        out.flush()
-        child = subprocess.Popen([sys.executable, "-m", "iafetch", *argv], stdout=out, stderr=subprocess.STDOUT,
-                                 stdin=subprocess.DEVNULL, start_new_session=True,
-                                 env={**os.environ, "PYTHONUNBUFFERED": "1"})
-    print(f"Downloading in the background (process {child.pid}).\n"
-          f"  progress:  iafetch status\n  the log:   tail -f {log}\n"
-          f"  pause:     kill {child.pid}   (iafetch get picks up where it stopped)")
+    pid = control.start_background(argv)
+    print(f"Downloading in the background (process {pid}).\n"
+          f"  progress:  iafetch status, or iafetch dashboard\n  the log:   tail -f {log_path()}\n"
+          f"  pause:     iafetch stop   (or --after-current); iafetch start picks up where it stopped")
     return EXIT_OK
+
+
+def cmd_start(args, config) -> int:
+    args.background, args.dry_run = True, False
+    return cmd_get(args, config)
+
+
+def cmd_stop(args, config) -> int:
+    ok, message = control.stop(after_current=args.after_current)
+    print(message)
+    return EXIT_OK if ok else EXIT_ERROR
 
 
 def _stop_on_signals() -> dict:
@@ -742,4 +760,4 @@ def _clock(t: float) -> str:
 
 
 COMMANDS = {"search": cmd_search, "show": cmd_show, "picks": cmd_picks, "queue": cmd_queue, "get": cmd_get, "process": cmd_process,
-            "status": cmd_status, "terms": cmd_terms, "dashboard": cmd_dashboard}
+            "status": cmd_status, "terms": cmd_terms, "dashboard": cmd_dashboard, "start": cmd_start, "stop": cmd_stop}

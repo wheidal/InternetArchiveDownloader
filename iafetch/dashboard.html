@@ -128,6 +128,14 @@ tr.current td { background: var(--accent-soft); }
 #lib header strong { color: var(--fg); font-weight: 600; }
 .disk { margin-top: 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--muted); }
 @media (max-width: 640px) { table { min-width: 0; } .hide-sm { display: none; } .detail { max-width: none; } }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.acts button { all: unset; cursor: pointer; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; border: 1px solid var(--line); background: var(--panel); }
+.acts button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.acts button:hover { border-color: var(--accent); }
+.acts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.acts button[disabled] { opacity: .5; cursor: default; }
+.acts .msg { font-size: 13px; color: var(--muted); }
+.nowhead { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: start; }
 .tag.video { background: var(--blue-soft); color: var(--blue); }
 .tag.books { background: var(--queued-soft); color: var(--queued); }
 .tag.games { background: var(--have-soft); color: var(--have); }
@@ -172,7 +180,7 @@ tr.current td { background: var(--accent-soft); }
 
 <script id="data" type="application/json">__DATA__</script>
 <script>
-const LIVE = __LIVE__, REFRESH = __REFRESH__;
+const LIVE = __LIVE__, REFRESH = __REFRESH__, TOKEN = __TOKEN__;
 let D = JSON.parse(document.getElementById("data").textContent);
 let lastOk = Date.now(), lost = false;
 const st = { tab: "queue", kind: "", q: "", shown: 200 };
@@ -195,6 +203,8 @@ const thumb = (id, local, cls) => `<img class="thumb ${cls || ""}" loading="lazy
 const KIND = { video: "Video", books: "Books", games: "Games", audio: "Audio", images: "Images", data: "Data", other: "Other" };
 const STATE = { starting: "Starting", downloading: "Downloading", between: "Between items" };
 
+let nowDrawn = "";
+function setNow(html) { if (html !== nowDrawn) { $("now").innerHTML = html; nowDrawn = html; } }
 function renderTop() {
   const s = D.status, waiting = D.queue.filter((e) => !e.now);
   let lede;
@@ -203,7 +213,7 @@ function renderTop() {
   else if (s && s.running) lede = `<span class="dot live"></span><b>${STATE[s.state] || s.state}</b>, item ${s.item} of ${s.items}, ` +
     `${s.rate ? "capped at " + size(s.rate) + "/s" : "no rate cap"}, started ${clock(s.started)}. Updated ${clock(D.at)}.`;
   else if (s) lede = `<span class="dot"></span><b>No download running.</b> The last run ${s.state === "finished" ? "ended" : s.state === "stopped" ? "was stopped" : "stopped without finishing"} at ${clock(s.updated)}. Updated ${clock(D.at)}.`;
-  else lede = `<span class="dot"></span><b>No download has run yet.</b> Start one with <code>iafetch get --background</code>.`;
+  else lede = `<span class="dot"></span><b>No download has run yet.</b> Start one with <code>iafetch start</code>.`;
   $("lede").innerHTML = lede;
 
   const stats = [];
@@ -225,14 +235,14 @@ function renderTop() {
     if (s.state === "downloading" && s.name) bars.push(["File", `${s.file} of ${s.files}`, pct(s.file_done, s.file_size), s.file_size ? `${pct(s.file_done, s.file_size).toFixed(0)}% of ${size(s.file_size)}` : size(s.file_done), ""]);
     if (s.item_size) bars.push(["This item", "", pct(s.item_done, s.item_size), `${size(s.item_done)} of ${size(s.item_size)}`, ""]);
     if (s.total) bars.push(["Whole run", "", pct(s.done, s.total), `${pct(s.done, s.total).toFixed(0)}%`, "run"]);
-    now.innerHTML = `<div class="nowgrid">${thumb(s.identifier, false)}<div><h2>Now</h2>
+    setNow(`<div class="nowhead"><div class="nowgrid">${thumb(s.identifier, false)}<div><h2>Now</h2>
       ${s.title ? `<div class="title">${esc(s.title)}</div>` : ""}<div class="what">${link(s.identifier)}</div>
-      <div class="sub">${s.state === "downloading" && s.name ? "file " + esc(s.name) : esc(STATE[s.state] || s.state)}${s.quiet > 120 && s.state === "downloading" ? " · no news for " + Math.round(s.quiet / 60) + " min: it may be waiting on archive.org" : ""}</div></div></div>
-      <div class="prog">${bars.map(([l, x, p, n, k]) => `<span class="lbl">${l}</span><span class="track ${k}"><i style="width:${p.toFixed(1)}%"></i></span><span class="num">${x ? x + " · " : ""}${n}</span>`).join("")}</div>`;
+      <div class="sub">${s.state === "downloading" && s.name ? "file " + esc(s.name) : esc(STATE[s.state] || s.state)}${s.quiet > 120 && s.state === "downloading" ? " · no news for " + Math.round(s.quiet / 60) + " min: it may be waiting on archive.org" : ""}</div></div></div>${actions(true)}</div>
+      <div class="prog">${bars.map(([l, x, p, n, k]) => `<span class="lbl">${l}</span><span class="track ${k}"><i style="width:${p.toFixed(1)}%"></i></span><span class="num">${x ? x + " · " : ""}${n}</span>`).join("")}</div>`);
   } else if (s && !s.running && s.state !== "finished" && s.identifier) {
-    now.innerHTML = `<h2>Paused</h2><div class="sub">It was in the middle of <span class="id" style="display:inline">${link(s.identifier)}</span>; <code>iafetch get</code> picks up where it left off.</div>`;
+    setNow(`<div class="nowhead"><div><h2>Paused</h2><div class="sub">It was in the middle of <span class="id" style="display:inline">${link(s.identifier)}</span>; <code>iafetch start</code> picks up where it left off.</div></div>${actions(false)}</div>`);
   } else {
-    now.innerHTML = `<h2>Now</h2><div class="sub">Nothing downloading. ${waiting.length ? `${waiting.length.toLocaleString()} item${waiting.length === 1 ? "" : "s"} waiting in the queue.` : "The queue is empty."}</div>`;
+    setNow(`<div class="nowhead"><div><h2>Now</h2><div class="sub">Nothing downloading. ${waiting.length ? `${waiting.length.toLocaleString()} item${waiting.length === 1 ? "" : "s"} waiting in the queue.` : "The queue is empty."}</div></div>${waiting.length ? actions(false) : ""}</div>`);
   }
 
   const needs = $("needs");
@@ -241,6 +251,31 @@ function renderTop() {
   needs.innerHTML = items.length ? `<h2>Needs you</h2><ul>${items.join("")}</ul>` +
     `<p class="foot" style="margin:10px 0 0">${D.needs.some((r) => r.status === "review") ? "Edit the plan in the inbox, set <code>\"approved\": true</code>, then <code>iafetch process &lt;plan&gt;</code>. " : ""}${D.needs.some((r) => r.status === "failed") ? "Queue failed downloads again with <code>iafetch queue retry</code>." : ""}</p>` : "";
 }
+
+// Start and Stop: only on the page this computer's dashboard served (not --lan, not a snapshot)
+let busy = false, said = "";
+function actions(isRunning) {
+  if (!LIVE || !TOKEN || !(D.control && D.control.writes)) return "";
+  const b = (act, label, cls, extra) => `<button data-act="${act}" class="${cls || ""}" ${busy ? "disabled" : ""}${extra || ""}>${label}</button>`;
+  const btns = isRunning
+    ? (D.control.stop_after ? `<span class="msg">Stopping after this item.</span>` : b("stop-after", "Stop after this item")) + b("stop", "Stop now")
+    : b("start", "Start", "primary");
+  return `<div class="acts">${btns}${said ? `<span class="msg">${esc(said)}</span>` : ""}</div>`;
+}
+async function act(which) {
+  if (which === "stop" && !confirm("Stop the download now? The file in progress keeps what it has, and Start resumes it.")) return;
+  busy = true; said = which === "start" ? "Starting…" : "Stopping…"; renderTop();
+  try {
+    const r = await fetch(which === "start" ? "api/start" : "api/stop", { method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Iafetch-Token": TOKEN }, body: JSON.stringify({ after: which === "stop-after" }) });
+    said = (await r.json()).message || "";
+  } catch (e) { said = "Couldn't reach the dashboard."; }
+  busy = false;
+  try { const r = await fetch("data.json", { cache: "no-store" }); D = await r.json(); } catch (e) {}
+  render();
+  setTimeout(() => { said = ""; renderTop(); }, 15000);
+}
+$("now").addEventListener("click", (e) => { const b = e.target.closest("button[data-act]"); if (b && !busy) act(b.dataset.act); });
 
 function renderLibrary() {
   const lib = D.library, box = $("lib");
@@ -305,8 +340,7 @@ function renderTable() {
 }
 
 function renderFoot() {
-  const s = D.status, pid = s && s.running ? `kill ${s.pid}` : "kill <process>";
-  $("foot").innerHTML = `Watching only: pause the run with <code>${esc(pid)}</code> (it resumes where it stopped), start one with <code>iafetch get --background</code>. Queue more with <code>iafetch queue add</code> or <code>iafetch picks --queue</code>; take items out with <code>iafetch queue remove</code>; send failed ones round again with <code>iafetch queue retry</code>.`;
+  $("foot").innerHTML = `${D.control && D.control.writes && TOKEN ? "Start and Stop are above. " : "Watching only. "}From a terminal: <code>iafetch stop</code> (or <code>--after-current</code>) pauses the run, <code>iafetch start</code> resumes it. Queue more with <code>iafetch queue add</code> or <code>iafetch picks --queue</code>; take items out with <code>iafetch queue remove</code>; send failed ones round again with <code>iafetch queue retry</code>.`;
 }
 function render() { renderTop(); renderLibrary(); renderTable(); renderFoot(); }
 render();
