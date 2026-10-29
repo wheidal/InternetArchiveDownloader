@@ -73,8 +73,8 @@ class FakeArchive:
                 m = d["metadata"]
                 doc = {"identifier": i, "title": m["title"], "item_size": d["item_size"],
                        "format": sorted({f.get("format", "") for f in d["files"]}), "downloads": d.get("downloads", 0),
-                       **{k: m[k] for k in ("mediatype", "language", "year", "date", "collection", "licenseurl", "subject")
-                          if k in m}}
+                       **{k: m[k] for k in fields if k in m and k not in ("title",)},
+                       **{k: d[k] for k in ("avg_rating", "num_reviews") if k in d}}
                 docs.append({k: v for k, v in doc.items() if k in fields or k == "identifier"})
             return json.dumps({"items": docs, "total": len(docs)}).encode()
         if path == "/advancedsearch.php":

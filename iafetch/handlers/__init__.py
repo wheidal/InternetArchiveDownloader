@@ -4,14 +4,16 @@ rule, then generic. Rules naming a handler that isn't built yet fall back to gen
 from .audiobook import Audiobook
 from .deadtag import Deadtag
 from .generic import Generic
+from .livemusic import LiveMusic
 from .music import Music
 from .radio import Radio
 from .software import Software
 from .texts import Texts
 from .video import Video
 
-HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software(), Audiobook(), Radio(), Music())}
-MEDIATYPES = {"movies": "video", "texts": "texts", "software": "software"}  # mediatype -> handler
+HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software(), Audiobook(), Radio(), Music(),
+                                 LiveMusic())}
+MEDIATYPES = {"movies": "video", "texts": "texts", "software": "software", "etree": "livemusic"}  # mediatype -> handler
 
 
 def choose(item, config, override: str = "") -> tuple[object, str]:

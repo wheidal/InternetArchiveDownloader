@@ -109,6 +109,13 @@ def main(argv: list[str] | None = None) -> int:
                     "the US; whether you may download the rest is up to you")
     pk.add_argument("--refresh", action="store_true", help="read Wikidata's and IMDb's lists again")
 
+    sh = sub.add_parser("shows", help="a band's shows on archive.org (etree), with the best tape of each")
+    sh.add_argument("band", help="the band's collection (TeaLeafGreen) or name (\"Tea Leaf Green\")")
+    sh.add_argument("--year", help="1999, or a range: 1997-1999")
+    sh.add_argument("--all", action="store_true", help="every tape of each show, ranked, not only the best")
+    sh.add_argument("--prefer", choices=["16bit", "24bit"], default="16bit")
+    sh.add_argument("--queue", action="store_true", help="queue the best tape of each show listed")
+
     sub.add_parser("status", help="what a running get is doing")
 
     dash = sub.add_parser("dashboard", help="a live page of the downloads, in a browser on this computer")
@@ -714,6 +721,54 @@ def _years(text: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2) or m.group(1))
 
 
+# --- shows ---------------------------------------------------------------------------------------------
+
+def cmd_shows(args, config) -> int:
+    from .livemusic import rank
+    archive = _archive(config)
+    band = args.band.strip()
+    if band.replace(" ", "").lower() in ("gratefuldead", "thegratefuldead"):
+        return _fail("the Grateful Dead's shows are deadfetch's: deadfetch search, deadfetch top, deadfetch queue add")
+    query = (f'collection:"{band}"' if re.fullmatch(r"[A-Za-z0-9._-]+", band) else f'creator:"{band}"')
+    query = f"({query} OR creator:\"{band}\") AND mediatype:etree " + rights.RESTRICTED_QUERY
+    recordings = [rank.Recording.from_doc(d) for d in archive.scrape(query, rank.FIELDS)]
+    recordings = [r for r in recordings if r.date]
+    if args.year:
+        lo, hi = _years(args.year)
+        recordings = [r for r in recordings if lo <= int(r.date[:4]) <= hi]
+    if not recordings:
+        return _fail(f"no shows found for {band!r} on archive.org (try the band's collection name, as in its etree URL)")
+    mean = rank.collection_mean(recordings)
+    by_date: dict[str, list] = {}
+    for r in recordings:
+        by_date.setdefault(r.date, []).append(r)
+    queue, best = Queue(), []
+    for date in sorted(by_date):
+        ranked = rank.rank_date(by_date[date], mean, args.prefer)
+        top = ranked[0]
+        best.append(top.recording.identifier)
+        r, sc = top.recording, top.score
+        rating = f"{r.rating:.1f}/5 ({r.reviews})" if r.rating else "unrated"
+        entry = queue.get(r.identifier)
+        mark = f" [{entry.status}]" if entry else ""
+        place = ", ".join(x for x in (r.venue, r.city) if x)
+        more = f"  (+{len(ranked) - 1} other tape{'s' if len(ranked) > 2 else ''})" if len(ranked) > 1 and not args.all else ""
+        print(f"{date}  {place[:48]:<48} {sc.source.upper():<7} {sc.format:<6} {rating:<12} {r.identifier}{mark}{more}")
+        if args.all:
+            for x in ranked:
+                print(f"            {x.score.total:.3f}  {x.score.source:<7} {x.score.format:<6} "
+                      f"{(f'{x.recording.rating:.1f}/5 ({x.recording.reviews})' if x.recording.rating else 'unrated'):<12} "
+                      f"{x.recording.identifier}" + (f"  ({', '.join(x.score.notes)})" if x.score.notes else ""))
+    print(f"\n{len(by_date):,} show(s), {len(recordings):,} tape(s). Best tape: rating (weighted by reviews), "
+          f"downloads, source (SBD > matrix > FM > audience) and format (16-bit FLAC > 24-bit > Shorten).")
+    if args.queue:
+        added = queue_identifiers(best, config, archive, queue, say=print)
+        print(f"{added} added. Download with: iafetch start")
+    else:
+        print("Queue the best tape of each with --queue, or one with: iafetch queue add <identifier>")
+    return EXIT_OK
+
+
 # --- dashboard ----------------------------------------------------------------------------------------
 
 def cmd_dashboard(args, config) -> int:
@@ -880,4 +935,4 @@ def _clock(t: float) -> str:
 
 COMMANDS = {"search": cmd_search, "show": cmd_show, "picks": cmd_picks, "queue": cmd_queue, "get": cmd_get, "process": cmd_process,
             "status": cmd_status, "terms": cmd_terms, "dashboard": cmd_dashboard, "start": cmd_start, "stop": cmd_stop,
-            "tui": cmd_tui}
+            "tui": cmd_tui, "shows": cmd_shows}

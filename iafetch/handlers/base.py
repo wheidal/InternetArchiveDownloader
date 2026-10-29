@@ -23,6 +23,7 @@ class Plan:
     dest: str  # the item's folder in the library
     moves: list[list[str]] = field(default_factory=list)  # [path in source, path in dest]
     writes: dict[str, str] = field(default_factory=dict)  # path in dest -> text to write there (e.g. movie.nfo)
+    tags: dict[str, dict[str, str]] = field(default_factory=dict)  # path in dest -> tags to write (editable in review)
     sidecar: str = "iafetch.json"  # path in dest of the item's record
     review: list[str] = field(default_factory=list)  # why it needs a person to look (empty: it doesn't)
     warnings: list[str] = field(default_factory=list)

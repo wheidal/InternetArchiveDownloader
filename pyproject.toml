@@ -26,7 +26,7 @@ iafetch = "iafetch.cli:main"
 Homepage = "https://github.com/wheidal/InternetArchiveDownloader"
 
 [tool.setuptools]
-packages = ["iafetch", "iafetch.handlers", "iafetch.tui"]
+packages = ["iafetch", "iafetch.handlers", "iafetch.tui", "iafetch.livemusic"]
 
 [tool.setuptools.package-data]
 iafetch = ["dashboard.html"]

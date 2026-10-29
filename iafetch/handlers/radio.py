@@ -18,6 +18,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from .. import tags
+from ..download import safe_path
 from ..select import TILE, Profile, Selection
 from .base import Handler, Plan, clean
 
@@ -236,7 +237,7 @@ def tag_episodes(plan: Plan, item, selection: Selection, dest: Path) -> int:
     processed = {}
     for src, rel in plan.moves:
         f = by_name.get(src)
-        path = dest / rel
+        path = safe_path(dest, rel)  # the name it was filed under
         if f is None or not path.is_file():
             continue
         ep = episode(f, series, item)

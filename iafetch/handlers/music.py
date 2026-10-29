@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from .. import tags
+from ..download import safe_path
 from ..select import TILE, Profile, Selection, size_of
 from .base import Handler, Plan, clean, collection_title
 
@@ -272,7 +273,7 @@ def finish(plan: Plan, item, selection: Selection, dest: Path) -> int:
     is). Records the tagged files' MD5s. How many were tagged."""
     cover = None
     for _, rel in plan.moves:
-        path = dest / rel
+        path = safe_path(dest, rel)
         if rel.startswith(".iafetch") or path.suffix.lower() not in (".jpg", ".jpeg", ".png", ".tif", ".tiff") \
                 or not path.is_file():
             continue
@@ -299,7 +300,7 @@ def finish(plan: Plan, item, selection: Selection, dest: Path) -> int:
     }
     processed = {}
     for src, rel in plan.moves:
-        f, path = by_name.get(src), dest / rel
+        f, path = by_name.get(src), safe_path(dest, rel)  # the name it was filed under
         if f is None or _is_image(f) or not path.is_file():
             continue
         t = tracks[src]
