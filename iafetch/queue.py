@@ -43,6 +43,9 @@ class Queue:
         columns = {r[1] for r in self.db.execute("PRAGMA table_info(queue)")}
         if "finished" not in columns:  # queues made before items recorded when they ended
             self.db.execute("ALTER TABLE queue ADD COLUMN finished REAL")
+        if "position" not in columns:  # queues made before items could be reordered: the order they were added
+            self.db.execute("ALTER TABLE queue ADD COLUMN position REAL")
+            self.db.execute("UPDATE queue SET position = added")
         self.db.commit()
 
     def close(self) -> None:
@@ -56,7 +59,7 @@ class Queue:
 
     def _entries(self, where: str = "", args: tuple = ()) -> list[Entry]:
         rows = self.db.execute(f"SELECT identifier, title, size, handler, options, status, added, error, result, id, "
-                               f"finished FROM queue {where} ORDER BY added, id", args).fetchall()
+                               f"finished FROM queue {where} ORDER BY position, added, id", args).fetchall()
         return [Entry(r[0], r[1] or "", r[2] or 0, r[3] or "", json.loads(r[4] or "{}"), r[5], r[6], r[7] or "",
                       r[8] or "", r[9], r[10]) for r in rows]
 
@@ -77,10 +80,11 @@ class Queue:
                                (e.identifier, PENDING)).fetchone():
                 return False
             self.db.execute("DELETE FROM queue WHERE identifier = ?", (e.identifier,))
-            self.db.execute("INSERT INTO queue (identifier, title, size, handler, options, status, added, error, result) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, '', '')",
-                            (e.identifier, e.title, e.size, e.handler, json.dumps(e.options), PENDING,
-                             e.added or time.time()))
+            added = e.added or time.time()
+            self.db.execute("INSERT INTO queue (identifier, title, size, handler, options, status, added, error, result, "
+                            "position) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?)",
+                            (e.identifier, e.title, e.size, e.handler, json.dumps(e.options), PENDING, added,
+                             max(added, self._last_position() + 1)))
         return True
 
     def set(self, identifier: str, status: str, error: str = "", result: str = "") -> None:
@@ -107,10 +111,34 @@ class Queue:
         with self.db:
             if identifiers:
                 marks = ",".join("?" * len(identifiers))
-                return self.db.execute(f"UPDATE queue SET status = ?, error = '', added = ? WHERE status = ? "
-                                       f"AND identifier IN ({marks})", (PENDING, time.time(), FAILED, *identifiers)).rowcount
-            return self.db.execute("UPDATE queue SET status = ?, error = '', added = ? WHERE status = ?",
-                                   (PENDING, time.time(), FAILED)).rowcount
+                return self.db.execute(f"UPDATE queue SET status = ?, error = '', added = ?, position = ? WHERE status = ? "
+                                       f"AND identifier IN ({marks})",
+                                       (PENDING, time.time(), self._last_position() + 1, FAILED, *identifiers)).rowcount
+            return self.db.execute("UPDATE queue SET status = ?, error = '', added = ?, position = ? WHERE status = ?",
+                                   (PENDING, time.time(), self._last_position() + 1, FAILED)).rowcount
+
+    def _last_position(self) -> float:
+        return self.db.execute("SELECT COALESCE(MAX(position), 0) FROM queue").fetchone()[0]
+
+    def move(self, identifier: str, where: str, busy: str = "") -> bool:
+        """Move a waiting item to the "top" or "bottom" of the queue, or one place "up" or "down". `busy`, the item
+        being downloaded, stays first and isn't moved. False if the item isn't waiting or can't go further."""
+        order = [e for e in self.pending() if e.identifier != busy]
+        i = next((n for n, e in enumerate(order) if e.identifier == identifier), None)
+        if i is None:
+            return False
+        j = {"top": 0, "bottom": len(order) - 1, "up": i - 1, "down": i + 1}[where]
+        if j == i or not 0 <= j < len(order):
+            return False
+        order.insert(j, order.pop(i))
+        first = min((e.added for e in self.pending()), default=time.time())  # keep `busy` ahead of everything
+        with self.db:
+            for n, e in enumerate(order):
+                self.db.execute("UPDATE queue SET position = ? WHERE identifier = ? AND status = ?",
+                                (first + 1 + n, e.identifier, PENDING))
+            if busy:
+                self.db.execute("UPDATE queue SET position = ? WHERE identifier = ?", (first, busy))
+        return True
 
     def clear(self) -> int:
         with self.db:

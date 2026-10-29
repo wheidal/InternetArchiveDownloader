@@ -25,6 +25,29 @@ class QueueTest(unittest.TestCase):
             self.assertEqual(q.clear(), 2)
             self.assertEqual(q.pending(), [])
 
+    def test_moving(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            q = Queue(Path(tmp) / "q.db")
+            for i in "abcde":
+                q.add(Entry(i))
+            order = lambda: "".join(e.identifier for e in q.pending())  # noqa: E731
+            self.assertTrue(q.move("d", "top"))
+            self.assertEqual(order(), "dabce")
+            self.assertTrue(q.move("d", "down"))
+            self.assertEqual(order(), "adbce")
+            self.assertTrue(q.move("a", "bottom"))
+            self.assertEqual(order(), "dbcea")
+            self.assertFalse(q.move("a", "down"))  # already last
+            self.assertFalse(q.move("zz", "top"))
+            self.assertTrue(q.move("e", "top", busy="d"))  # the item downloading stays first
+            self.assertEqual(order(), "debca")
+            self.assertFalse(q.move("d", "bottom", busy="d"))
+            q.add(Entry("f"))
+            self.assertEqual(order(), "debcaf")  # new items join the end
+            q.set("b", FAILED, "x")
+            q.retry()
+            self.assertEqual(order(), "decafb")  # a retry goes to the end
+
     def test_two_queues_share_one_file(self):  # a queue add while get runs
         with tempfile.TemporaryDirectory() as tmp:
             q1, q2 = Queue(Path(tmp) / "q.db"), Queue(Path(tmp) / "q.db")

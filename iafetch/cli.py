@@ -63,6 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("--from", dest="from_file", type=Path, help="a text file of identifiers, one a line (the first "
                     "word of each line; # starts a comment)")
     man = qsub.add_parser("manuals", help="queue the manuals of the games already queued or downloaded")
+    mv = qsub.add_parser("move", help="change where waiting items are in the queue")
+    mv.add_argument("where", choices=["top", "up", "down", "bottom"])
+    mv.add_argument("items", nargs="+", help="identifiers (several move together, keeping their order)")
     retry = qsub.add_parser("retry", help="queue failed items again")
     retry.add_argument("items", nargs="*", help="(default: every failed one)")
     qsub.add_parser("clear", help="remove everything still waiting")
@@ -252,6 +255,16 @@ def cmd_queue(args, config) -> int:
         print(f"Removed {n} of {len(keys)} (the rest weren't waiting in the queue).")
     elif args.action == "manuals":
         return _queue_manuals(config, queue)
+    elif args.action == "move":
+        s = read_status()
+        busy = s.get("identifier", "") if running(s) else ""
+        ids = [identifier_of(x)[0] for x in args.items]
+        # top and down move the last first, so several keep their order
+        moved = [i for i in (ids[::-1] if args.where in ("top", "down") else ids) if queue.move(i, args.where, busy)]
+        for i in ids:
+            if i not in moved:
+                print(f"{i}: not moved ({'it is downloading now' if i == busy else 'not waiting, or already there'})")
+        print(f"Moved {len(moved)}. The queue's order is what get follows next.")
     elif args.action == "retry":
         print(f"Queued {queue.retry([identifier_of(x)[0] for x in args.items] or None)} again.")
     elif args.action == "clear":
@@ -406,22 +419,20 @@ def cmd_get(args, config) -> int:
     used = 0
     try:
         tried: set[str] = set()
+        only = {e.identifier for e in pending} if args.limit else None  # --limit: just these; else whatever is queued
         n = 0
         while True:
-            if not pending and not args.limit:  # items queued while this ran join the end of it
-                pending = [x for x in queue.pending() if x.identifier not in tried]
-                progress.grow(len(pending), sum(x.size for x in pending))
-            if not pending:
+            # The queue as it is now, in its order: items queued, moved or removed while this runs count
+            waiting = [x for x in queue.pending() if x.identifier not in tried and (only is None or x.identifier in only)]
+            if not waiting:
                 break
+            progress.plan(n + len(waiting), sum(x.size for x in waiting))
             if control.stop_after_requested():
                 say("\nStopping here, as asked (iafetch stop --after-current). iafetch start carries on.")
                 break
-            e = pending.pop(0)
+            e = waiting[0]
             tried.add(e.identifier)
             n += 1
-            if not queue.still_pending(e.identifier):
-                progress.grow(-1, -e.size)
-                continue  # removed from the queue while this ran
             if budget is not None and used + e.size > budget and used:
                 say(f"Stopping: the next item would pass --max-size {args.max_size}.")
                 break

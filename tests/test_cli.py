@@ -176,6 +176,29 @@ class CliTest(CliBase):
         self.assertIn("== noyear", out)
         self.assertEqual(Queue().pending(), [])
 
+    def test_get_follows_the_queue_as_it_changes(self):
+        self.fake.add("noyear", [file("noyear.mp4", fmt="MPEG4")], date="", title="Mystery", mediatype="data")
+        self.fake.add("third", [file("third.mp4", fmt="MPEG4")], title="Third", mediatype="data")
+        self.run_cli("queue", "add", "film", "noyear", "third", "--as", "generic")
+        order = []
+        real = cli._get_one
+
+        def get_one(e, *a, **kw):
+            order.append(e.identifier)
+            if e.identifier == "film":  # moved from another terminal while film downloads
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cli.main(["queue", "move", "top", "third"])
+            return real(e, *a, **kw)
+        with mock.patch.object(cli, "_get_one", get_one):
+            code, out = self.run_cli("get")
+        self.assertEqual(order, ["film", "third", "noyear"])
+
+    def test_queue_move(self):
+        self.run_cli("queue", "add", "film", "lent", "gd77")
+        code, out = self.run_cli("queue", "move", "top", "gd77")
+        self.assertIn("Moved 1", out)
+        self.assertEqual([e.identifier for e in Queue().pending()], ["gd77", "film"])
+
     def test_stop_after_the_current_item(self):
         self.fake.add("noyear", [file("noyear.mp4", fmt="MPEG4")], date="", title="Mystery", mediatype="data")
         self.run_cli("queue", "add", "film", "noyear", "--as", "generic")

@@ -82,6 +82,13 @@ class Progress:
         self._samples: deque = deque()  # (time, bytes received), for the speed
         self._written = 0.0
 
+    def plan(self, items: int, waiting: int) -> None:
+        """The run as it stands: `items` in all (done and to come), `waiting` bytes still to fetch. The queue can
+        change while a run goes (items queued, moved or removed), so this is said before each item."""
+        if (items, self._run_base + waiting) != (self.s["items"], self.s["total"]):
+            self.s["items"], self.s["total"] = items, self._run_base + waiting
+            self.write(force=True)
+
     def grow(self, items: int, size: int) -> None:
         """More items joined the run (queued while it ran)."""
         self.s["items"] += items
