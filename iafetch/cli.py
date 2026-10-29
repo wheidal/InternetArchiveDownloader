@@ -105,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     dash.add_argument("--lan", action="store_true", help="open it to the home network, not only this computer")
     dash.add_argument("--html", metavar="FILE", type=Path, help="write a snapshot page instead (it doesn't refresh)")
     sub.add_parser("terms", help="read the Internet Archive's terms notice and acknowledge it")
+    sub.add_parser("tui", help="the terminal UI: search, filter and queue; look after the queue")
 
     args = parser.parse_args(argv)
     try:
@@ -181,50 +182,60 @@ def cmd_search(args, config) -> int:
 def cmd_show(args, config) -> int:
     identifier, _ = identifier_of(args.item)
     item = _archive(config).item(identifier, refresh=args.refresh)
-    print(f"{item.title}\n  {identifier}  https://archive.org/details/{identifier}")
-    print(f"  kind: {item.mediatype}   collections: {', '.join(item.collections)}   year: {item.year or '?'}")
-    print(f"  license: {rights.license_text(item)}")
+    print("\n".join(show_lines(item, config, _options(args), args.handler)))
+    return EXIT_OK
+
+
+def show_lines(item, config, options: dict | None = None, handler_name: str = "") -> list[str]:
+    """What `iafetch show` prints about an item: its metadata, license, handler, the files it would take and
+    where they'd be filed. The terminal UI's item view shows the same."""
+    out: list[str] = []
+    say = out.append
+    identifier = item.identifier
+    say(f"{item.title}\n  {identifier}  https://archive.org/details/{identifier}")
+    say(f"  kind: {item.mediatype}   collections: {', '.join(item.collections)}   year: {item.year or '?'}")
+    say(f"  license: {rights.license_text(item)}")
     blocked = rights.restriction(item)
     if blocked:
-        print(f"\niafetch won't download this: {blocked}.")
-        return EXIT_OK
-    handler, why = choose(item, config, args.handler)
-    print(f"  handler: {handler.name} ({why})")
+        say(f"\niafetch won't download this: {blocked}.")
+        return out
+    handler, why = choose(item, config, handler_name)
+    say(f"  handler: {handler.name} ({why})")
     if not handler.downloads:
-        print("\nQueued, this goes to deadfetch, which downloads and files it with deadtag.")
-        return EXIT_OK
-    sel = selection(handler, item, _options(args), config)
+        say("\nQueued, this goes to deadfetch, which downloads and files it with deadtag.")
+        return out
+    sel = selection(handler, item, options or {}, config)
     chosen = {f["name"] for f in sel.files}
-    print(f"\n  files ({len(item.files)} listed; * = would be downloaded):")
+    say(f"\n  files ({len(item.files)} listed; * = would be downloaded):")
     for f in sorted(item.files, key=lambda f: f.get("name", "")):
         if junk(f) and f["name"] not in chosen:
             continue
         mark = "*" if f["name"] in chosen else " "
-        print(f"   {mark} {f['name']:<50} {f.get('source', ''):<10} {f.get('format', ''):<22} {_size(size_of(f)):>9}"
-              + (f"  {picture(f)}" if picture(f) else ""))
+        say(f"   {mark} {f['name']:<50} {f.get('source', ''):<10} {f.get('format', ''):<22} {_size(size_of(f)):>9}"
+            + (f"  {picture(f)}" if picture(f) else ""))
     hidden = sum(1 for f in item.files if junk(f))
-    print(f"\n  {len(sel.files)} file(s), {_size(sel.size)} with the item's records"
-          f" -> {config.folder(handler.kind(item))}")
+    say(f"\n  {len(sel.files)} file(s), {_size(sel.size)} with the item's records"
+        f" -> {config.folder(handler.kind(item))}")
     notes = [f"{hidden} generated file(s) not shown (thumbnails, logs, indexes)"] if hidden else []
     if sel.private:
         notes.append(f"{sel.private} private file(s) skipped")
     if sel.encrypted:
         notes.append(f"{sel.encrypted} encrypted lending file(s) skipped")
     for n in notes:
-        print(f"  {n}")
+        say(f"  {n}")
     if sel.files and handler.name != "generic":
         plan = handler.plan(item, config.inbox / identifier, sel, config)
         moves = [m for m in plan.moves if not m[1].startswith(".iafetch/")]
-        print(f"\n  filed as ({plan.dest}):")
+        say(f"\n  filed as ({plan.dest}):")
         for _, rel in moves[:SHOW_MOVES]:
-            print(f"    {rel}")
+            say(f"    {rel}")
         if len(moves) > SHOW_MOVES:
-            print(f"    ... and {len(moves) - SHOW_MOVES} more")
+            say(f"    ... and {len(moves) - SHOW_MOVES} more")
         for rel in plan.writes:
-            print(f"    {rel}")
+            say(f"    {rel}")
         for why in plan.review:
-            print(f"  needs review: {why}")
-    return EXIT_OK
+            say(f"  needs review: {why}")
+    return out
 
 
 SHOW_MOVES = 12
@@ -282,35 +293,44 @@ def _queue_add(args, config, queue) -> int:
         texts += found
     if not texts:
         return _fail("queue what? Give identifiers or URLs, --from a file of them, or --search")
+    added = queue_identifiers(texts, config, archive, queue, _options(args), args.handler,
+                              manuals=not args.no_manual, say=print)
+    print(f"{added} added. Download with: iafetch start")
+    return EXIT_OK
+
+
+def queue_identifiers(texts: list[str], config, archive, queue, options: dict | None = None, handler_name: str = "",
+                      *, manuals: bool = True, say=print) -> int:
+    """Queue items (identifiers or URLs), as `queue add` does: restricted ones refused, each sized by what its
+    handler would take, a game with its manual. How many were added."""
     added = 0
     for text in texts:
         identifier, one_file = identifier_of(text)
         try:
             item = archive.item(identifier)
         except FetchError as exc:
-            print(f"{identifier}: {exc}")
+            say(f"{identifier}: {exc}")
             continue
         blocked = rights.restriction(item)
         if blocked:
-            print(f"{identifier}: not queued: {blocked}")
+            say(f"{identifier}: not queued: {blocked}")
             continue
-        options = _options(args)
+        opts = dict(options or {})
         if one_file:
-            options["globs"] = [one_file]
-        handler, _ = choose(item, config, args.handler)
-        size = selection(handler, item, options, config).size if handler.downloads else int(item.raw.get("item_size") or 0)
-        if queue.add(Entry(item.identifier, item.title, size, args.handler, options)):
+            opts["globs"] = [one_file]
+        handler, _ = choose(item, config, handler_name)
+        size = selection(handler, item, opts, config).size if handler.downloads else int(item.raw.get("item_size") or 0)
+        if queue.add(Entry(item.identifier, item.title, size, handler_name, opts)):
             added += 1
-            print(f"queued {identifier} ({_size(size)}, {handler.name}; {rights.license_text(item)})")
-            if handler.name == "software" and not args.no_manual:
-                added += _queue_manual(item, config, archive, queue)
+            say(f"queued {identifier} ({_size(size)}, {handler.name}; {rights.license_text(item)})")
+            if handler.name == "software" and manuals:
+                added += _queue_manual(item, config, archive, queue, say)
         else:
-            print(f"{identifier}: already queued")
-    print(f"{added} added. Download with: iafetch get")
-    return EXIT_OK
+            say(f"{identifier}: already queued")
+    return added
 
 
-def _queue_manual(game, config, archive, queue) -> int:
+def _queue_manual(game, config, archive, queue, say=print) -> int:
     """Queue the game's English manual, if archive.org has one, to be filed in the game's folder. 1 if queued."""
     from .handlers.software import platform
     from .handlers.texts import manual_docs
@@ -321,14 +341,14 @@ def _queue_manual(game, config, archive, queue) -> int:
     manual = archive.item(d["identifier"])
     size = selection(choose(manual, config)[0], manual, {}, config).size
     if queue.add(Entry(d["identifier"], manual.title, size, "texts", {"manual_for": game.identifier})):
-        print(f"  with its manual: {d['identifier']} ({_size(size)})")
+        say(f"  with its manual: {d['identifier']} ({_size(size)})")
         return 1
     queued = queue.get(d["identifier"])
     if queued and queued.status == PENDING:  # already waiting (e.g. queued with a whole collection)
         queue.set_options(d["identifier"], {**queued.options, "manual_for": game.identifier})
-        print(f"  its manual {d['identifier']} is already queued; it will go in the game's folder")
+        say(f"  its manual {d['identifier']} is already queued; it will go in the game's folder")
         return 1
-    print(f"  its manual {d['identifier']} was downloaded before ({queued.result if queued else ''})")
+    say(f"  its manual {d['identifier']} was downloaded before ({queued.result if queued else ''})")
     return 0
 
 
@@ -648,6 +668,15 @@ def cmd_dashboard(args, config) -> int:
     return EXIT_OK
 
 
+def cmd_tui(args, config) -> int:
+    try:
+        from .tui.app import run
+    except ImportError:
+        return _fail("the terminal UI needs Textual: .venv/bin/pip install -e \".[tui]\" (in iafetch's folder)")
+    run(config)
+    return EXIT_OK
+
+
 # --- status, terms ----------------------------------------------------------------------------------
 
 def cmd_status(args, config) -> int:
@@ -771,4 +800,5 @@ def _clock(t: float) -> str:
 
 
 COMMANDS = {"search": cmd_search, "show": cmd_show, "picks": cmd_picks, "queue": cmd_queue, "get": cmd_get, "process": cmd_process,
-            "status": cmd_status, "terms": cmd_terms, "dashboard": cmd_dashboard, "start": cmd_start, "stop": cmd_stop}
+            "status": cmd_status, "terms": cmd_terms, "dashboard": cmd_dashboard, "start": cmd_start, "stop": cmd_stop,
+            "tui": cmd_tui}

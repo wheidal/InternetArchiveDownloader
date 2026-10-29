@@ -17,8 +17,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - name: Install iafetch (and iacore, from its GitHub release)
-        run: pip install -e .
+      - name: Install iafetch with the terminal UI (and iacore, from its GitHub release)
+        run: pip install -e ".[tui]"
       - name: Run the tests
         # A run that hangs is stopped after 2 minutes with SIGABRT, and faulthandler prints every
         # thread's stack, so the log shows where it was stuck.

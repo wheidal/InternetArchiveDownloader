@@ -4,6 +4,7 @@ turning what the user typed (an identifier or an archive.org URL) into an identi
 import json
 import re
 import sqlite3
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -98,15 +99,16 @@ class Archive:
         self.db = None
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
-            self.db = sqlite3.connect(cache)
+            self.db = sqlite3.connect(cache, check_same_thread=False)  # the terminal UI reads it from worker threads
             self.db.execute("CREATE TABLE IF NOT EXISTS metadata (identifier TEXT PRIMARY KEY, fetched REAL, json TEXT)")
+        self._db_lock = threading.Lock()
 
     def item(self, identifier: str, refresh: bool = False) -> Item:
         data = None if refresh else self._cached(identifier)
         if data is None:
             data = json.loads(self.client.get(metadata_url(identifier)))
             if data and self.db:
-                with self.db:
+                with self._db_lock, self.db:
                     self.db.execute("INSERT OR REPLACE INTO metadata VALUES (?, ?, ?)",
                                     (identifier, self.clock(), json.dumps(data)))
         return Item.from_json(identifier, data)
@@ -114,7 +116,8 @@ class Archive:
     def _cached(self, identifier: str) -> dict | None:
         if not self.db:
             return None
-        row = self.db.execute("SELECT fetched, json FROM metadata WHERE identifier = ?", (identifier,)).fetchone()
+        with self._db_lock:
+            row = self.db.execute("SELECT fetched, json FROM metadata WHERE identifier = ?", (identifier,)).fetchone()
         if row and self.clock() - row[0] < self.ttl:
             return json.loads(row[1])
         return None

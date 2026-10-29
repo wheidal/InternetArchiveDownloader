@@ -15,6 +15,9 @@ dependencies = [
     "iacore @ git+https://github.com/wheidal/iacore@v0.1.1",
 ]
 
+[project.optional-dependencies]
+tui = ["textual>=8.0,<9"]  # iafetch tui
+
 [project.scripts]
 iafetch = "iafetch.cli:main"
 
@@ -22,7 +25,7 @@ iafetch = "iafetch.cli:main"
 Homepage = "https://github.com/wheidal/InternetArchiveDownloader"
 
 [tool.setuptools]
-packages = ["iafetch", "iafetch.handlers"]
+packages = ["iafetch", "iafetch.handlers", "iafetch.tui"]
 
 [tool.setuptools.package-data]
 iafetch = ["dashboard.html"]

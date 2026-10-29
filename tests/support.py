@@ -67,8 +67,16 @@ class FakeArchive:
         if path.startswith("/metadata/"):
             return json.dumps(self.items.get(urllib.parse.unquote(path.split("/", 2)[2]), {})).encode()
         if path == "/services/search/v1/scrape":
-            return json.dumps({"items": [{"identifier": i, "title": d["metadata"]["title"], "item_size": d["item_size"]}
-                                         for i, d in self.items.items()], "total": len(self.items)}).encode()
+            fields = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query)).get("fields", "").split(",")
+            docs = []
+            for i, d in self.items.items():
+                m = d["metadata"]
+                doc = {"identifier": i, "title": m["title"], "item_size": d["item_size"],
+                       "format": sorted({f.get("format", "") for f in d["files"]}), "downloads": d.get("downloads", 0),
+                       **{k: m[k] for k in ("mediatype", "language", "year", "date", "collection", "licenseurl", "subject")
+                          if k in m}}
+                docs.append({k: v for k, v in doc.items() if k in fields or k == "identifier"})
+            return json.dumps({"items": docs, "total": len(docs)}).encode()
         if path == "/advancedsearch.php":
             q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))["q"]
             if q.startswith("identifier:("):  # a lookup of particular items

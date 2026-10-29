@@ -47,6 +47,8 @@ iafetch status                                # what it's doing
 iafetch stop                                  # pause it (--after-current: finish the item it's on first); start resumes
 iafetch process <identifier>                  # file an item after reviewing its plan
 iafetch dashboard                             # a live page of the downloads: http://localhost:8643 (--lan for the home network)
+iafetch tui                                   # the terminal UI: search, filter, tick and queue; reorder the queue
+iafetch queue move top <identifier>           # or up, down, bottom: get follows the queue's order
 ```
 
 The first `get` shows the Archive's terms notice once and asks you to acknowledge it (`iafetch terms`).
@@ -62,6 +64,7 @@ Python 3.11 or newer, no other dependencies beyond iacore.
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e .            # fetches iacore from its GitHub release
+.venv/bin/pip install -e ".[tui]"     # with the terminal UI (adds Textual)
 # working on iacore too: .venv/bin/pip install -e ../iacore
 ```
 

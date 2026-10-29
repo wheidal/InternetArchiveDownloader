@@ -83,3 +83,12 @@ def stop(after_current: bool = False, wait: float = STOP_WAIT, *, kill=os.kill, 
     if now.get("name") and now.get("file_size"):
         done = f", {now['file_done'] / 1024 ** 3:.1f} of {now['file_size'] / 1024 ** 3:.1f} GB of {now['name']}"
     return True, f"Stopped in {what}{done}. iafetch start picks up where it left off."
+
+
+def start() -> tuple[bool, str]:
+    """`iafetch start`, as from the command line, with all its checks (the terms, the root, a run already
+    going); (started, what it said). For the dashboard's and the terminal UI's Start."""
+    done = subprocess.run([sys.executable, "-m", "iafetch", "start"], capture_output=True, text=True, timeout=120,
+                          stdin=subprocess.DEVNULL)
+    said = (done.stdout + done.stderr).strip().removeprefix("iafetch: ")
+    return done.returncode == 0, said.splitlines()[0] if said else ("Started." if done.returncode == 0 else "It didn't start.")

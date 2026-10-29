@@ -11,8 +11,6 @@ import json
 import os
 import secrets
 import shutil
-import subprocess
-import sys
 import sqlite3
 import threading
 import time
@@ -176,7 +174,7 @@ class Dashboard:
         self.config = config
         self.writes = writes
         self.token = secrets.token_urlsafe(18)  # only pages this dashboard served can start or stop
-        self.starter = starter or _start
+        self.starter = starter or control.start
         self.lib: dict | None = None
         self.kinds = Kinds()
         self._stop = threading.Event()
@@ -263,10 +261,3 @@ class Dashboard:
 
         return ThreadingHTTPServer((host, port), Handler)
 
-
-def _start() -> tuple[bool, str]:
-    """`iafetch start`, as from the command line (with all its checks); (started, what it said)."""
-    done = subprocess.run([sys.executable, "-m", "iafetch", "start"], capture_output=True, text=True, timeout=120,
-                          stdin=subprocess.DEVNULL)
-    said = (done.stdout + done.stderr).strip().removeprefix("iafetch: ")
-    return done.returncode == 0, said.splitlines()[0] if said else ("Started." if done.returncode == 0 else "It didn't start.")
