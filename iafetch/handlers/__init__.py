@@ -6,13 +6,13 @@ from .deadtag import Deadtag
 from .generic import Generic
 from .livemusic import LiveMusic
 from .music import Music
-from .radio import Radio
+from .radio import Podcast, Radio
 from .software import Software
 from .texts import Texts
 from .video import Video
 
 HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software(), Audiobook(), Radio(), Music(),
-                                 LiveMusic())}
+                                 LiveMusic(), Podcast())}
 MEDIATYPES = {"movies": "video", "texts": "texts", "software": "software", "etree": "livemusic"}  # mediatype -> handler
 
 

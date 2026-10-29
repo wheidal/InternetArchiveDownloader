@@ -22,19 +22,28 @@ from ..download import safe_path
 from ..select import TILE, Profile, Selection
 from .base import Handler, Plan, clean
 
-AUDIO = (  # format names, most wanted first: archive.org's MP3s are what OTR is shared as
+AUDIO = (  # format names, most wanted first: archive.org's MP3s are what OTR and podcasts are shared as
     ("vbr mp3", "mp3", "32kbps mp3", "64kbps mp3", "128kbps mp3", "192kbps mp3", "256kbps mp3", "320kbps mp3"),
+    ("m4a", "aac", "mpeg4 audio", "apple lossless audio"),
     ("flac", "24bit flac"),
+    ("wave", "aiff"),
     ("ogg vorbis",),
 )
+WEBSITE = re.compile(r"(?i)\s*[-–|:]?\s*\b(?:https?://)?(?:www\.)?[\w-]+\.(?:com|org|net|info|co\.uk)\b/?")
 SERIES_NOISE = re.compile(r"(?i)\s*(?:[-–:]\s*)?(?:single episodes|complete series|the complete|old time radio|"
                           r"\(?otr\)?|radio shows?|radio programs?|radio|collection|the \d0'?s)\s*$")
 DATE_FORMS = (  # year, month, day (the second: month, day, year); two-digit years are the 1900s
     re.compile(r"(?<!\d)((?:19|20)?\d\d)[-._ ](0[1-9]|1[0-2])[-._ ](0[1-9]|[12]\d|3[01])(?!\d)"),   # 52-04-26, 1952-04-26
     re.compile(r"(?<!\d)(0[1-9]|1[0-2])/(0[1-9]|[12]\d|3[01])/(\d\d)(?!\d)"),                        # 04/26/52 (album tags)
     re.compile(r"^((?:19)?\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\b"),                            # 481207 (title tags)
+    re.compile(r"(?<!\d)(0[1-9]|[12]\d|3[01])[-._ ](0[1-9]|1[0-2])[-._ ]((?:19|20)\d\d)(?!\d)"),         # 14_11_2009
+    re.compile(r"(?<!\d)(0[1-9]|1[0-2])[-._ ](1[3-9]|2\d|3[01])[-._ ]((?:19|20)\d\d)(?!\d)"),            # 11-24-2009
 )
-EPISODE_FORMS = (re.compile(r"\((\d{1,4})\)"), re.compile(r"(?i)\bep(?:isode)?\.?\s*(\d{1,4})\b"))
+# the order each pattern gives (year, month, day) in
+DATE_GROUPS = ((1, 2, 3), (3, 1, 2), (1, 2, 3), (3, 2, 1), (3, 1, 2))
+EPISODE_FORMS = (re.compile(r"\((\d{1,4})\)"), re.compile(r"(?i)\bep(?:isode)?\.?\s*(\d{1,4})\b"),
+                 re.compile(r"^[A-Za-z]{2,6}\s?(\d{2,4})(?![\d-])"),  # EPDB001, CC472: (not YTJD 1948-12-07)
+                 re.compile(r"^\s*(\d{1,4})(?:\s*[.):-]\s*|\s+)(?=\D)"))  # "1. El Muro", "001 Al-Fatihah"
 
 
 @dataclass
@@ -54,18 +63,8 @@ class Radio(Handler):
         return Profile(originals=False)
 
     def narrow(self, item, selection: Selection, config=None) -> Selection:
-        seen, files = set(), []
-        for formats in AUDIO:
-            for f in selection.files:
-                if f.get("format", "").lower() in formats and f["name"] not in seen:
-                    stem = PurePosixPath(f["name"]).stem.lower()
-                    if f.get("source") == "derivative" and any(PurePosixPath(g["name"]).stem.lower() == stem for g in files):
-                        continue
-                    seen.add(f["name"])
-                    files.append(f)
-            if files:
-                break
-        series = series_name(item)
+        files = episode_files(selection.files)
+        series = series_name(item, files)
         return replace(selection, files=sorted(files, key=lambda f: _order(episode(f, series, item))))
 
     def choose_episodes(self, item, selection: Selection, options: dict) -> Selection:
@@ -82,22 +81,31 @@ class Radio(Handler):
             keep.append(f)
         return replace(selection, files=keep)
 
+    GENRE = "Old Time Radio"
+
+    def episode_folder(self, ep: "Episode", any_dated: bool) -> str:
+        """The folder an episode goes in, inside the series' folder ("" for the series' folder itself)."""
+        if ep.date or ep.number is not None:
+            return ep.date[:4] if ep.date else "Undated"
+        return "Extras"  # a biography, an interview, a promo: not an episode
+
     def plan(self, item, staged, selection, config) -> Plan:
-        series = series_name(item)
-        dest = config.inside(config.folder("radio") / _short(series))
+        series = series_name(item, selection.files)
+        dest = config.inside(config.folder(self.kind(item)) / _short(series))
         plan = Plan(item.identifier, self.name, str(staged), str(dest), sidecar=f".iafetch/{item.identifier}/iafetch.json")
         taken = set()
-        for f in selection.files:
-            ep = episode(f, series, item)
+        episodes = [(f, episode(f, series, item)) for f in selection.files]
+        any_dated = any(ep.date for _, ep in episodes)
+        for f, ep in episodes:
+            folder = self.episode_folder(ep, any_dated)
             if ep.date or ep.number is not None:
                 name = f"{series}" + (f" {ep.date}" if ep.date else "") + (f" ({ep.number:03d})" if ep.number is not None else "")
                 name += f" {ep.title}" if ep.title else ""
-                folder = ep.date[:4] if ep.date else "Undated"
-            else:  # a biography, an interview, a promo: not an episode
-                name, folder = ep.title or clean(PurePosixPath(f["name"]).stem), "Extras"
-            rel = f"{folder}/{_short(name)}{PurePosixPath(f['name']).suffix.lower()}"
+            else:
+                name = ep.title or clean(PurePosixPath(f["name"]).stem)
+            rel = (f"{folder}/" if folder else "") + f"{_short(name)}{PurePosixPath(f['name']).suffix.lower()}"
             if rel.lower() in taken or (dest / rel).exists():  # two files read the same: keep both
-                rel = f"{folder}/{_short(name)} [{PurePosixPath(f['name']).stem}]{PurePosixPath(f['name']).suffix.lower()}"
+                rel = (f"{folder}/" if folder else "") + f"{_short(name)} [{PurePosixPath(f['name']).stem}]{PurePosixPath(f['name']).suffix.lower()}"
             taken.add(rel.lower())
             plan.moves.append([f["name"], rel])
         for f in selection.record:
@@ -112,16 +120,25 @@ class Radio(Handler):
     def process(self, plan: Plan, item, selection, config):
         from .generic import file_plan
         dest = file_plan(plan, item, selection, config, self.name)
-        tag_episodes(plan, item, selection, Path(dest))
+        tag_episodes(plan, item, selection, Path(dest), self.GENRE)
         return dest
 
 
 # --- reading episodes ---------------------------------------------------------------------------------------
 
-def series_name(item) -> str:
+def series_name(item, files: list[dict] | None = None) -> str:
     """The series: the item's title without "- Single Episodes", "(OTR)" and the like; for a single-episode item
-    ("Big Story 1952-04-09 Printed Word…"), what comes before the date."""
+    ("Big Story 1952-04-09 Printed Word…"), what comes before the date. When the title is only the identifier
+    ("rr12016"), the album its files are tagged with ("Case Closed!")."""
     title = item.title
+    if files and (title == item.identifier or " " not in title.strip()):
+        albums = [str(f.get("album") or "").strip() for f in files if str(f.get("album") or "").strip()]
+        folders = [str(PurePosixPath(f["name"]).parent) for f in files if "/" in f["name"]]
+        if albums:
+            title = max(set(albums), key=albums.count)
+        elif folders and len(set(folders)) == 1:  # "English Podcast Elementary/englishpod_0149pb.mp3"
+            title = folders[0]
+    title = WEBSITE.sub("", title)  # "Maher Al-Muaiqly- TvQuran.com"
     for pattern in DATE_FORMS:
         m = pattern.search(title)
         if m and m.start() > 2:
@@ -154,10 +171,10 @@ def episode(f: dict, series: str, item=None) -> Episode:
 
 
 def _date(text: str) -> str:
-    for n, pattern in enumerate(DATE_FORMS):
+    for pattern, (yg, mg, dg) in zip(DATE_FORMS, DATE_GROUPS):
         m = pattern.search(text)
         if m:
-            y, mo, d = (m.group(3), m.group(1), m.group(2)) if n == 1 else m.groups()
+            y, mo, d = m.group(yg), m.group(mg), m.group(dg)
             return f"{('19' + y) if len(y) == 2 else y}-{mo}-{d}"
     return ""
 
@@ -168,7 +185,12 @@ def _number(text: str, date: str) -> int | None:
         if m:
             return int(m.group(1))
     m = re.search(r"(?<![\d-])(?:\d\d|\d{4})[-._ ]\d\d[-._ ]\d\d[ _-]*(\d{3,4})(?!\d)", text)  # 58-11-02_343_Old
-    return int(m.group(1)) if m else None
+    if m:
+        return int(m.group(1))
+    if not date:  # a bare number in a name with no date: englishpod_0149pb, Mishary/01
+        m = re.search(r"(?<![\d.-])(\d{2,4})(?![\d-])", text)
+        return int(m.group(1)) if m else None
+    return None
 
 
 def _rest(text: str, series: str, date: str) -> str:
@@ -189,7 +211,8 @@ def _rest(text: str, series: str, date: str) -> str:
                 if n == want:
                     text = text[i + 1:]
                     break
-    text = re.sub(r"(?i)^\s*(?:\((?:\d{1,4}|x+)\)|ep(?:isode)?\.?\s*\d{1,4}|\d{3,4}|x{3})(?=\s|$)", "", text.strip())
+    text = re.sub(r"(?i)^\s*(?:\((?:\d{1,4}|x+)\)|ep(?:isode)?\.?\s*\d{1,4}|\d{1,4}[.):]?|x{3}|[a-z]{2,6}\d{2,4}:?)(?=\s|$)",
+                  "", text.strip())
     return re.sub(r"\s+", " ", text).strip(" -–_,.")
 
 
@@ -227,12 +250,12 @@ def parse_ranges(text: str) -> set[int] | None:
 
 # --- tagging ----------------------------------------------------------------------------------------------
 
-def tag_episodes(plan: Plan, item, selection: Selection, dest: Path) -> int:
+def tag_episodes(plan: Plan, item, selection: Selection, dest: Path, genre: str = "Old Time Radio") -> int:
     """Tag the filed episodes (album = series, title, date, track = episode), if mutagen is installed, and
     record the tagged files' MD5s. How many were tagged."""
     if not tags.available():
         return 0
-    series = series_name(item)
+    series = series_name(item, selection.files)
     by_name = {f["name"]: f for f in selection.files}
     processed = {}
     for src, rel in plan.moves:
@@ -241,7 +264,7 @@ def tag_episodes(plan: Plan, item, selection: Selection, dest: Path) -> int:
         if f is None or not path.is_file():
             continue
         ep = episode(f, series, item)
-        if tags.write(path, {"album": series, "artist": series, "title": ep.title or path.stem, "genre": "Old Time Radio",
+        if tags.write(path, {"album": series, "artist": series, "title": ep.title or path.stem, "genre": genre,
                              "date": ep.date, "tracknumber": "" if ep.number is None else str(ep.number)}):
             processed[rel] = tags.md5(path)
     tags.record_processed(dest / plan.sidecar, processed)
@@ -250,3 +273,52 @@ def tag_episodes(plan: Plan, item, selection: Selection, dest: Path) -> int:
 
 def _short(name: str, limit: int = 150) -> str:
     return name if len(name) <= limit else name[:limit].rsplit(" ", 1)[0]
+
+
+
+def episode_files(files: list[dict]) -> list[dict]:
+    """The episodes as uploaded, in the most wanted format there is, one copy of each. But when the only uploads
+    are WAV (a speech recorded straight to disk), archive.org's MP3 of each instead: its VBR copy, else its
+    64 kbps one (never both)."""
+    audio = [f for f in files if any(f.get("format", "").lower() in formats for formats in AUDIO)]
+    originals = [f for f in audio if f.get("source") == "original"]
+    lossless_only = originals and all(f.get("format", "").lower() in ("wave", "aiff") for f in originals)
+    derived_mp3 = [f for f in audio if f.get("source") == "derivative" and f.get("format", "").lower() in AUDIO[0]]
+    if originals and not (lossless_only and derived_mp3):
+        pool = originals
+    else:
+        pool = derived_mp3 or audio
+    for formats in AUDIO:
+        found = [f for f in pool if f.get("format", "").lower() in formats]
+        if found:
+            break
+    else:
+        return []
+    by_source: dict[str, dict] = {}  # one copy per uploaded file: the VBR copy before the 64 kbps one
+    for f in sorted(found, key=lambda f: ("64kbps" in f.get("format", "").lower(), f["name"])):
+        key = f.get("original") or f["name"] if f.get("source") == "derivative" else f["name"]
+        by_source.setdefault(str(key), f)
+    return list(by_source.values())
+
+
+# --- podcasts and spoken word ---------------------------------------------------------------------------------
+
+PODCASTS = {"podcasts", "podcasts_miscellaneous", "podcasts_compilations"}
+SPOKEN = {"audio_religion", "audio_sermons", "audio_islamic", "opensource_religionaudio"}
+
+
+class Podcast(Radio):
+    """Podcasts, and talks, sermons and recitations: series of episodes, read as radio's are, filed in
+    Podcasts/{show}/ or Spoken Word/{speaker or series}/. Dated episodes go in year folders; numbered or plain
+    ones sit in the show's folder (there's no "Undated"); only an item that mixes dated episodes with other files
+    puts those in Extras/."""
+    name = "podcast"
+    GENRE = "Podcast"
+
+    def kind(self, item) -> str:
+        return "spoken" if SPOKEN.intersection(item.collections) else "podcasts"
+
+    def episode_folder(self, ep: Episode, any_dated: bool) -> str:
+        if ep.date:
+            return ep.date[:4]
+        return "Extras" if any_dated and ep.number is None else ""

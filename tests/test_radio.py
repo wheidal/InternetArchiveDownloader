@@ -143,3 +143,60 @@ class TaggingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PodcastTest(unittest.TestCase):
+    """The shapes of real podcast and spoken-word items."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.config = parse_config({"root": tmp.name})
+
+    def plan(self, identifier, files, **meta):
+        from iafetch.handlers.radio import Podcast
+        meta = {"mediatype": "audio", "collection": ["podcasts_compilations", "podcasts"], **meta}
+        it = Item.from_json(identifier, item_json(identifier, files, **meta))
+        h = choose(it, self.config)[0]
+        self.assertIsInstance(h, Podcast)
+        return h.plan(it, self.root / "x", selection(h, it, {}, self.config), self.config)
+
+    def moves(self, plan):
+        return [m[1] for m in plan.moves if not m[1].startswith(".iafetch") and m[1] != "cover.jpg"]
+
+    def test_dated_episodes_day_month_year(self):
+        plan = self.plan("elpodcastdelbuho", [mp3("EPDB001-El_Muro_de_Berlin_14_11_2009.mp3", "1. El Muro de Berlín"),
+                                              mp3("EPDB002-Bob_Marley_21_11_2009.mp3", "2. Bob Marley"),
+                                              mp3("Promo_de_El_Podcast_del_Buho.mp3", "Promo")],
+                         title="El Podcast del Búho")
+        self.assertEqual(plan.dest, str((self.root / "Podcasts" / "El Podcast del Búho").resolve()))
+        self.assertEqual(self.moves(plan), ["2009/El Podcast del Búho 2009-11-14 (001) El Muro de Berlín.mp3",
+                                            "2009/El Podcast del Búho 2009-11-21 (002) Bob Marley.mp3",
+                                            "Extras/Promo de El Podcast del Buho.mp3"])  # the tag reads as cut off
+
+    def test_numbered_episodes_sit_in_the_shows_folder(self):
+        plan = self.plan("rr12016", [mp3("CaseClosed472.mp3", "CC472: Barrie Craig", "Case Closed!"),
+                                     mp3("CaseClosed473.mp3", "CC473: The Crime Club", "Case Closed!")], title="rr12016")
+        self.assertTrue(plan.dest.endswith("Podcasts/Case Closed!"))  # the title is only the identifier: the album tag
+        self.assertEqual(self.moves(plan), ["Case Closed! (472) Barrie Craig.mp3", "Case Closed! (473) The Crime Club.mp3"])
+
+    def test_a_wav_upload_gets_archive_orgs_mp3(self):
+        files = [file("MLKDream.wav", fmt="WAVE", size=900, title="I Have a Dream"),
+                 mp3("MLKDream.mp3", "I Have a Dream", source="derivative", fmt="VBR MP3"),
+                 mp3("MLKDream_64kb.mp3", "I Have a Dream", source="derivative", fmt="64Kbps MP3")]
+        files[1]["original"] = files[2]["original"] = "MLKDream.wav"
+        plan = self.plan("MLKDream", files, title="I Have a Dream, Martin Luther King Jr.")
+        self.assertEqual([m[0] for m in plan.moves if m[0].endswith((".mp3", ".wav"))], ["MLKDream.mp3"])
+
+    def test_spoken_word(self):
+        plan = self.plan("TvQuran.com__Maher", [mp3("001.mp3", "Al-Fatihah"), mp3("002.mp3", "Al-Baqarah")],
+                         title="Maher Al-Muaiqly- TvQuran.com", collection=["audio_islamic", "audio_sermons", "audio_religion"])
+        self.assertEqual(plan.dest, str((self.root / "Spoken Word" / "Maher Al-Muaiqly").resolve()))
+        self.assertEqual(self.moves(plan), ["Maher Al-Muaiqly (001) Al-Fatihah.mp3", "Maher Al-Muaiqly (002) Al-Baqarah.mp3"])
+
+    def test_a_folder_names_the_show(self):
+        plan = self.plan("englishpod_B0127pb", [mp3("English Podcast Elementary/englishpod_0149pb.mp3")],
+                         title="englishpod_B0127pb")
+        self.assertTrue(plan.dest.endswith("Podcasts/English Podcast Elementary"))
+        self.assertEqual(self.moves(plan)[0][:34], "English Podcast Elementary (149) E")

@@ -38,13 +38,16 @@ MAX_CONCURRENCY = 4
 
 LIBRARY = {
     "movies": "Movies", "tv": "TV", "music": "Music", "livemusic": "Live Music", "radio": "Radio",
-    "audiobooks": "Audiobooks", "books": "Books", "magazines": "Magazines", "comics": "Comics",
+    "audiobooks": "Audiobooks", "podcasts": "Podcasts", "spoken": "Spoken Word",
+    "books": "Books", "magazines": "Magazines", "comics": "Comics",
     "games": "Games", "images": "Images", "data": "Data", "other": "Other",
 }
 HANDLERS = {"GratefulDead": "deadtag", "librivoxaudio": "audiobook", "audio_bookspoetry": "audiobook",
             "audiolibrary": "audiobook", "gutenberg-audiobooks": "audiobook", "audio_poetry": "audiobook",
             "oldtimeradio": "radio", "radioprograms": "radio",
-            "netlabels": "music", "georgeblood": "music", "78rpm": "music", "audio_music": "music"}
+            "netlabels": "music", "georgeblood": "music", "78rpm": "music", "audio_music": "music",
+            "podcasts": "podcast", "podcasts_miscellaneous": "podcast", "podcasts_compilations": "podcast",
+            "audio_religion": "podcast", "audio_sermons": "podcast", "audio_islamic": "podcast"}
 
 
 class ConfigError(Exception):

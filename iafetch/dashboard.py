@@ -36,6 +36,7 @@ KINDS = {"movies": "video", "texts": "books", "software": "games", "audio": "aud
 # library folder (a key of Config.library) -> the same kinds
 FOLDER_KINDS = {"movies": "video", "tv": "video", "books": "books", "magazines": "books", "comics": "books",
                 "games": "games", "music": "audio", "livemusic": "audio", "radio": "audio", "audiobooks": "audio",
+                "podcasts": "audio", "spoken": "audio",
                 "images": "images", "data": "data", "other": "other"}
 
 
