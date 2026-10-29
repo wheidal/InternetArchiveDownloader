@@ -92,3 +92,10 @@ def collection_title(item, archive, ignore: set[str] = frozenset()) -> str:
     if not leaves:
         return ""
     return clean(re.sub(r"(?i)\s+(archive|collection)$", "", found[leaves[0]][0].strip()))
+
+
+def person(name: str) -> str:
+    """A name as it's said: "Collins, Wilkie, 1824-1889" -> "Wilkie Collins"; "Twain, Mark" -> "Mark Twain"."""
+    name = re.sub(r",?\s*\(?\b\d{3,4}\??\s*-\s*(\d{3,4}\??)?\)?\s*$", "", name.strip()).strip(" ,")
+    m = re.fullmatch(r"([^,]+),\s*([^,]+)", name)
+    return f"{m.group(2).strip()} {m.group(1).strip()}" if m else name

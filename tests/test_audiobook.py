@@ -5,7 +5,8 @@ from pathlib import Path
 from iafetch.api import Item
 from iafetch.config import parse_config
 from iafetch.handlers import choose, selection
-from iafetch.handlers.audiobook import Audiobook, chapter_title, credits, person
+from iafetch.handlers.audiobook import Audiobook, chapter_title, credits
+from iafetch.handlers.base import person
 from tests.support import file, item_json
 
 LIBRIVOX = {"mediatype": "audio", "collection": ["librivoxaudio", "audio_bookspoetry"], "language": "eng"}

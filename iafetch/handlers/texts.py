@@ -29,7 +29,7 @@ from dataclasses import replace
 from pathlib import PurePosixPath
 
 from ..select import TILE, Profile, Selection, size_of
-from .base import Handler, Plan, clean, collection_title
+from .base import Handler, Plan, clean, collection_title, person
 
 PDF_FORMATS = ("text pdf", "additional text pdf", "pdf", "image container pdf")  # most wanted first
 EPUB_FORMATS = ("epub",)
@@ -54,6 +54,8 @@ class Texts(Handler):
         return Profile(originals=False)  # the searchable PDF is often a derivative
 
     def narrow(self, item, selection: Selection, config=None) -> Selection:
+        if is_gutenberg(item):
+            return replace(selection, files=gutenberg_files(selection.files))
         wanted = _formats(config)
         chosen = []
         if "pdf" in wanted:
@@ -73,19 +75,27 @@ class Texts(Handler):
         if dest.exists():  # another scan or edition of the same book: keep both
             dest = config.inside(dest.parent / f"{name} [{item.identifier}]")
         plan = Plan(item.identifier, self.name, str(staged), str(dest), sidecar=f".iafetch/{item.identifier}/iafetch.json")
-        by_ext = defaultdict(list)
-        for f in selection.files:
-            by_ext[_ext(f)].append(f)
-        for ext, files in by_ext.items():
-            for f in files:  # one document: named after the book; several: each keeps its own name
-                plan.moves.append([f["name"], name + ext if len(files) == 1 else _short(clean(PurePosixPath(f["name"]).stem)) + ext])
+        html = [f for f in selection.files if _ext(f) in (".htm", ".html")]
+        if is_gutenberg(item) and html:  # an HTML book: the page renamed, its pictures beside it as it links them
+            book_dir = PurePosixPath(html[0]["name"]).parent
+            for f in selection.files:
+                rel = PurePosixPath(f["name"]).relative_to(book_dir).as_posix() if f is not html[0] else name + _ext(f)
+                plan.moves.append([f["name"], rel])
+        else:
+            by_ext = defaultdict(list)
+            for f in selection.files:
+                by_ext[_ext(f)].append(f)
+            for ext, files in by_ext.items():
+                for f in files:  # one document: named after the book; several: each keeps its own name
+                    plan.moves.append([f["name"], name + ext if len(files) == 1 else _short(clean(PurePosixPath(f["name"]).stem)) + ext])
         for f in selection.record:
             plan.moves.append([f["name"], f".iafetch/{item.identifier}/{PurePosixPath(f['name']).name}"])
         if selection.tile:
             plan.moves.append([TILE, "cover.jpg"])
         plan.writes["metadata.opf"] = opf(item, title, author, has_cover=bool(selection.tile))
         if not selection.files:
-            plan.review.append("no PDF or EPUB to take (try --as generic)")
+            plan.review.append("no PDF or EPUB to take (try --as generic)" if not is_gutenberg(item) else
+                               "no EPUB, HTML or text to take (try --as generic)")
         if dest.exists():
             plan.review.append(f"{dest} already exists")
         plan.approved = not plan.review
@@ -135,10 +145,11 @@ def book_title(item) -> str:
 
 
 def author_of(item) -> str:
-    """The first creator, else the publisher, else a TOSEC tag's publisher, else "Unknown"."""
+    """The first creator (as it's said: "Twain, Mark, 1835-1910" -> Mark Twain), else the publisher, else a TOSEC
+    tag's publisher, else "Unknown"."""
     for value in (item.values("creator")[:1], item.values("publisher")[:1]):
         if value and value[0].strip():
-            return clean(value[0])
+            return clean(person(value[0]))
     m = TOSEC.search(item.title)
     if m and m.group(4):
         return clean(m.group(4))
@@ -336,3 +347,35 @@ def magazine_plan(item, staged, selection, config) -> Plan:
         plan.review.append("nothing tells which issue this is (no issue number or date): name it in the plan")
     plan.approved = not plan.review
     return plan
+
+
+
+# --- Project Gutenberg -------------------------------------------------------------------------------------
+
+def is_gutenberg(item) -> bool:
+    return "gutenberg" in item.collections
+
+
+def gutenberg_files(files: list[dict]) -> list[dict]:
+    """A Gutenberg book's reading copy: Gutenberg's own EPUB (the one with pictures, if there is one; it's made
+    from the text, not from scans), else its HTML page with the pictures it shows, else its plain text (UTF-8
+    first: N-0.txt, then N.txt, then N-8.txt in Latin-1), else (a collection of files, like the Moby Word Lists)
+    every text file. Never the zips, which repeat all of these."""
+    def named(pattern):
+        return [f for f in files if re.search(pattern, f["name"], re.I)]
+    epubs = [f for f in files if _ext(f) == ".epub"]
+    if epubs:
+        with_images = [f for f in epubs if "-images" in f["name"].lower()]
+        return [(with_images or epubs)[0]]
+    html = [f for f in files if _ext(f) in (".htm", ".html")]
+    if html:
+        page = max(html, key=size_of)
+        folder = str(PurePosixPath(page["name"]).parent)
+        pictures = [f for f in files if f is not page and folder != "." and f["name"].startswith(folder + "/")
+                    and _ext(f) in (".png", ".jpg", ".jpeg", ".gif", ".svg")]
+        return [page] + pictures
+    for pattern in (r"(^|/)(pg)?\d+-0\.txt$", r"(^|/)(pg)?\d+\.txt$", r"(^|/)(pg)?\d+-8\.txt$"):
+        found = named(pattern)
+        if found:
+            return found[:1]
+    return [f for f in files if _ext(f) == ".txt"]

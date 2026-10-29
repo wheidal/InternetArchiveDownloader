@@ -48,7 +48,7 @@ class TextsTest(unittest.TestCase):
         self.assertEqual(author_of(tosec), "Commodore")
         long = item([], title="C64 for the beginning beginner : an easy and helpful introduction", creator=["Jones, Ann"])
         self.assertEqual(book_title(long), "C64 for the beginning beginner")
-        self.assertEqual(author_of(long), "Jones, Ann")
+        self.assertEqual(author_of(long), "Ann Jones")  # catalogue order, said the usual way
         self.assertEqual(author_of(item([], title="Anon")), "Unknown")
         self.assertEqual(author_of(item([], title="X", publisher="Compute! Books")), "Compute! Books")
 
@@ -202,3 +202,47 @@ class MagazineTest(unittest.TestCase):
     def test_books_stay_books(self):
         it = Item.from_json("b", item_json("b", [], mediatype="texts", collection=["commodore_c64_books"]))
         self.assertEqual(Texts().kind(it), "books")
+
+
+class GutenbergTest(unittest.TestCase):
+    """The shapes of real Project Gutenberg items."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.config = parse_config({"root": tmp.name})
+
+    def item(self, files, **meta):
+        meta = {"mediatype": "texts", "collection": ["gutenberg"], "title": "Amusements in Mathematics",
+                "creator": "Dudeney, Henry Ernest, 1857-1930", "date": "", **meta}
+        return Item.from_json("g", item_json("g", files, **meta))
+
+    def names(self, files, **meta):
+        return [f["name"] for f in selection(Texts(), self.item(files, **meta), {}, self.config).files]
+
+    def test_gutenbergs_own_epub_with_pictures(self):
+        files = [file("34811-8.txt", fmt="Text"), file("34811-h.zip", fmt="ZIP"), file("pg34811-images.epub", fmt="EPUB"),
+                 file("pg34811.epub", fmt="EPUB"), file("pg34811.txt", fmt="Text")]
+        self.assertEqual(self.names(files), ["pg34811-images.epub"])
+
+    def test_the_html_book_with_its_pictures(self):
+        files = [file("16713-8.txt", fmt="Text"), file("16713.zip", fmt="ZIP"), file("16713-h/16713-h.htm", fmt="Hypertext"),
+                 file("16713-h/images/a055.png", fmt="PNG"), file("16713.txt", fmt="Text")]
+        it = self.item(files)
+        sel = selection(Texts(), it, {}, self.config)
+        self.assertEqual([f["name"] for f in sel.files], ["16713-h/16713-h.htm", "16713-h/images/a055.png"])
+        plan = Texts().plan(it, self.root / "x", sel, self.config)
+        self.assertEqual(plan.dest, str((self.root / "Books" / "Henry Ernest Dudeney" / "Amusements in Mathematics").resolve()))
+        self.assertIn(["16713-h/16713-h.htm", "Amusements in Mathematics.htm"], plan.moves)
+        self.assertIn(["16713-h/images/a055.png", "images/a055.png"], plan.moves)  # where the page links it
+        self.assertTrue(plan.approved)
+
+    def test_plain_text_utf8_first(self):
+        files = [file("100-8.txt", fmt="Text"), file("100.txt", fmt="Text"), file("100-0.txt", fmt="Text"), file("100.zip", fmt="ZIP")]
+        self.assertEqual(self.names(files), ["100-0.txt"])
+        self.assertEqual(self.names(files[:2]), ["100.txt"])
+
+    def test_a_collection_of_files(self):
+        files = [file("ACRONYMS.TXT", fmt="Text"), file("NAMES.TXT", fmt="Text"), file("mword10.zip", fmt="ZIP")]
+        self.assertEqual(self.names(files), ["ACRONYMS.TXT", "NAMES.TXT"])

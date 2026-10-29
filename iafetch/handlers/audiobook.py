@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import PurePosixPath
 
 from ..select import TILE, Profile, Selection, size_of
-from .base import Handler, Plan, clean
+from .base import Handler, Plan, clean, person
 
 AUDIOBOOK = "audiobook"  # archive.org's format name for an M4B
 # Chapter files, most wanted first: (format names, originals only)
@@ -136,13 +136,6 @@ def credits(item) -> tuple[str, str, str]:
             and not (creator and words(creator) & (words(title) | words(description)))):
         return clean(person(m.group(1))), clean(m.group(2)), narrator or clean(creator)
     return clean(creator) if creator else "Unknown", clean(title), narrator
-
-
-def person(name: str) -> str:
-    """A name as it's said: "Collins, Wilkie, 1824-1889" -> "Wilkie Collins"."""
-    name = re.sub(r",?\s*\(?\b\d{3,4}\s*-\s*(\d{3,4})?\)?\s*$", "", name.strip()).strip(" ,")
-    m = re.fullmatch(r"([^,]+),\s*([^,]+)", name)
-    return f"{m.group(2).strip()} {m.group(1).strip()}" if m else name
 
 
 def chapter_title(f: dict) -> str:

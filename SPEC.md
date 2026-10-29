@@ -336,7 +336,7 @@ Still open:
    - **Order within music:** studio music first (it builds the shared tagging groundwork), then live music. Before either, look at real items from a few etree bands, netlabels and 78s, as for video and magazines.
 
 5. **Gaps found in a survey of archive.org (2026-10-29), to do in this order.** Every downloadable media type reaches a handler (web crawls are out of scope; 505 k index entries without a media type aren't items), but some large areas only get the generic handler or nothing useful:
-   1. **Project Gutenberg** (59 k items): the texts handler finds no PDF and takes nothing. Take Gutenberg's own EPUB (37 k have one; not made from scans), else its HTML or plain text.
+   1. **Project Gutenberg** (59 k items) — *done 2026-10-29*: the texts handler found no PDF and took nothing. Now it takes Gutenberg's own EPUB (the one with pictures if there is one), else the HTML page with its pictures (laid out as the page links them), else plain text (UTF-8 first), else, for a collection of files, every text file; never the zips. Catalogue-style names ("Dudeney, Henry Ernest, 1857-1930") are said the usual way for every book.
    2. **Comics** (118 k; 58 k with CBZ/CBR): filed as books from the PDF. Prefer CBZ/CBR, file under `Comics/{series}/`, write `ComicInfo.xml`.
    3. **Podcasts** (1.3 M) and episodic spoken word (talks, sermons, ~2.8 M): generic. Treat as series of episodes, as radio: `Podcasts/{show}/{year}/`.
    4. **Images** (5.7 M: museum collections, maps): generic. The image handler of §6.10: by collection, with title and description kept with each image.
