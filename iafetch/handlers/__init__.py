@@ -1,13 +1,14 @@
 """The handlers, and which one an item gets (F6): a collection rule from the config first, then a mediatype
 rule, then generic. Rules naming a handler that isn't built yet fall back to generic."""
 
+from .audiobook import Audiobook
 from .deadtag import Deadtag
 from .generic import Generic
 from .software import Software
 from .texts import Texts
 from .video import Video
 
-HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software())}
+HANDLERS = {h.name: h for h in (Generic(), Deadtag(), Video(), Texts(), Software(), Audiobook())}
 MEDIATYPES = {"movies": "video", "texts": "texts", "software": "software"}  # mediatype -> handler
 
 
@@ -23,6 +24,8 @@ def choose(item, config, override: str = "") -> tuple[object, str]:
             if name in HANDLERS:
                 return HANDLERS[name], f"collection {collection}"
             return HANDLERS["generic"], f"collection {collection} maps to {name}, which isn't built yet"
+    if any(f.get("format") == "Audiobook" for f in item.files):  # an M4B: it's an audiobook, whatever its collection
+        return HANDLERS["audiobook"], "it has an audiobook (M4B)"
     name = MEDIATYPES.get(item.mediatype)
     if name:
         return HANDLERS[name], f"mediatype {item.mediatype}"
