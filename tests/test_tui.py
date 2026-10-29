@@ -127,6 +127,10 @@ class TuiTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([e.identifier for e in Queue().pending()], ["a", "c", "b"])
             await pilot.press("delete")
             self.assertEqual([e.identifier for e in Queue().pending()], ["a", "b"])
+            await pilot.press("u")  # undo the remove
+            self.assertEqual([e.identifier for e in Queue().pending()], ["a", "c", "b"])
+            table.move_cursor(row=table.get_row_index("c"))
+            await pilot.press("delete")
             await pilot.press("e")  # retry the failed one
             self.assertEqual([e.identifier for e in Queue().pending()], ["a", "b", "broken"])
             await pilot.press("g")

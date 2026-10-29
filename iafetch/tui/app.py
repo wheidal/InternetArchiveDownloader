@@ -413,6 +413,7 @@ class QueueScreen(Screen):
         Binding("minus", "move('down')", "Down"),
         Binding("b", "move('bottom')", "Bottom"),
         Binding("delete", "remove", "Remove"),
+        Binding("u", "restore", "Undo remove"),
         Binding("e", "retry", "Retry failed"),
         Binding("g", "start", "Start"),
         Binding("p", "stop(False)", "Stop now"),
@@ -506,6 +507,12 @@ class QueueScreen(Screen):
             self.app.say("That one is downloading now: stop the download first (p).", "warning")
             return
         Queue().remove(ident)
+        self.drawn = ()
+        self.action_reload()
+
+    def action_restore(self) -> None:
+        back = Queue().restore()
+        self.app.say(f"Put back {len(back)} item(s)." if back else "Nothing has been removed.")
         self.drawn = ()
         self.action_reload()
 

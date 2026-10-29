@@ -1,6 +1,7 @@
 """iafetch command line: search archive.org, look at items, queue them, download and file them."""
 
 import argparse
+import json
 import re
 import signal
 import socket
@@ -68,7 +69,17 @@ def main(argv: list[str] | None = None) -> int:
     mv.add_argument("items", nargs="+", help="identifiers (several move together, keeping their order)")
     retry = qsub.add_parser("retry", help="queue failed items again")
     retry.add_argument("items", nargs="*", help="(default: every failed one)")
-    qsub.add_parser("clear", help="remove everything still waiting")
+    qsub.add_parser("clear", help="remove everything still waiting (queue restore --last puts it back)")
+    qsub.add_parser("removed", help="what was taken out of the queue, most recent first")
+    rs = qsub.add_parser("restore", help="put removed items back where they were")
+    rs.add_argument("items", nargs="*", help="identifiers")
+    rs.add_argument("--last", action="store_true", help="the last removal (a whole clear, or the last remove)")
+    ex = qsub.add_parser("export", help="save the queue to a file (identifiers, options and order), to import later")
+    ex.add_argument("file", type=Path, help="where to write it; - for the terminal")
+    ex.add_argument("--all", action="store_true", help="every entry (done, failed, removed…), not only what's waiting")
+    im = qsub.add_parser("import", help="queue the items in a file: an export, or identifiers one a line")
+    im.add_argument("file", type=Path)
+    im.add_argument("--again", action="store_true", help="also items already downloaded (else they're skipped)")
 
     get = sub.add_parser("get", help="download the queue, filing each item in the library")
     _run_args(get)
@@ -262,8 +273,9 @@ def cmd_queue(args, config) -> int:
         keys = list(args.items) + (_lines(args.from_file) if args.from_file else [])
         if not keys:
             return _fail("remove what? Give identifiers, or --from a file of them")
-        n = sum(queue.remove(identifier_of(x.split()[0])[0]) for x in keys)
-        print(f"Removed {n} of {len(keys)} (the rest weren't waiting in the queue).")
+        when = time.time()  # one removal, for queue restore --last
+        n = sum(queue.remove(identifier_of(x.split()[0])[0], when) for x in keys)
+        print(f"Removed {n} of {len(keys)} (the rest weren't waiting in the queue). Undo: iafetch queue restore --last")
     elif args.action == "manuals":
         return _queue_manuals(config, queue)
     elif args.action == "move":
@@ -279,7 +291,24 @@ def cmd_queue(args, config) -> int:
     elif args.action == "retry":
         print(f"Queued {queue.retry([identifier_of(x)[0] for x in args.items] or None)} again.")
     elif args.action == "clear":
-        print(f"Removed {queue.clear()} waiting item(s).")
+        print(f"Removed {queue.clear()} waiting item(s). Undo: iafetch queue restore --last")
+    elif args.action == "removed":
+        gone = queue.removed()
+        if not gone:
+            print("Nothing has been removed from the queue.")
+        for e in gone:
+            print(f"{_clock(e.finished or 0)}  {e.identifier:<40} {_size(e.size):>9}  {e.title[:50]}")
+        if gone:
+            print(f"\n{len(gone)} removed. Put back: iafetch queue restore <identifier> ..., or --last for the last removal")
+    elif args.action == "restore":
+        if not args.items and not args.last:
+            return _fail("restore what? Give identifiers, or --last for the last removal (see: iafetch queue removed)")
+        back = queue.restore(None if args.last else [identifier_of(x)[0] for x in args.items])
+        print(f"Put back {len(back)} item(s), where they were in the queue.")
+    elif args.action == "export":
+        return _queue_export(args, queue)
+    elif args.action == "import":
+        return _queue_import(args, config, queue)
     return EXIT_OK
 
 
@@ -328,6 +357,49 @@ def queue_identifiers(texts: list[str], config, archive, queue, options: dict | 
         else:
             say(f"{identifier}: already queued")
     return added
+
+
+EXPORT_FORMAT = "iafetch-queue/1"
+
+
+def _queue_export(args, queue) -> int:
+    entries = (queue.all() + queue.removed()) if args.all else queue.pending()
+    data = {"format": EXPORT_FORMAT, "exported": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "entries": [{"identifier": e.identifier, "title": e.title, "size": e.size, "handler": e.handler,
+                         "options": e.options, "status": e.status} for e in entries]}
+    text = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
+    if str(args.file) == "-":
+        sys.stdout.write(text)
+        return EXIT_OK
+    path = args.file.expanduser()
+    path.write_text(text, encoding="utf-8")
+    print(f"Wrote {len(entries)} item(s) to {path}. Queue them again with: iafetch queue import {path}")
+    return EXIT_OK
+
+
+def _queue_import(args, config, queue) -> int:
+    """Queue what a file lists: an export (each item with its options and handler, in its order; only those
+    waiting when it was exported), or identifiers or URLs one a line. Items already queued are left as they
+    are; ones already downloaded are skipped unless --again."""
+    text = args.file.expanduser().read_text(encoding="utf-8")
+    if text.lstrip().startswith("{"):
+        data = json.loads(text)
+        if data.get("format") != EXPORT_FORMAT:
+            return _fail(f"{args.file} isn't an iafetch queue export")
+        wanted = [e for e in data.get("entries", []) if e.get("status", PENDING) == PENDING]
+    else:
+        wanted = [{"identifier": identifier_of(x.split()[0])[0]} for x in _lines(args.file)]
+    have = {e.identifier: e.status for e in queue.all()}
+    todo = [e for e in wanted if have.get(e["identifier"]) != PENDING and (args.again or have.get(e["identifier"]) != DONE)]
+    skipped = len(wanted) - len(todo)
+    archive = _archive(config, log=print)
+    added = 0
+    for e in todo:
+        added += queue_identifiers([e["identifier"]], config, archive, queue, e.get("options") or {},
+                                   e.get("handler", ""), manuals=False, say=print)
+    print(f"{added} added" + (f"; {skipped} skipped (already queued or downloaded; --again takes downloaded ones)"
+                              if skipped else "") + ". Download with: iafetch start")
+    return EXIT_OK
 
 
 def _queue_manual(game, config, archive, queue, say=print) -> int:

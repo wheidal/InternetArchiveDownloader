@@ -1,5 +1,8 @@
 """The download queue and its state, in SQLite (~/.local/share/iafetch/iafetch.db), so a second iafetch
-(a `queue add` while `get` runs) and an interrupted run both see the same queue (F10, F13)."""
+(a `queue add` while `get` runs) and an interrupted run both see the same queue (F10, F13).
+
+Removing an item (or clearing the queue) only marks it removed, with the time: `restore` puts it back where it
+was, and the removed ones are left out of everything else."""
 
 import json
 import os
@@ -9,7 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 PENDING, DONE, FAILED, UNAVAILABLE, REVIEW, HANDED = "pending", "done", "failed", "unavailable", "review", "handed"
-STATES = (PENDING, DONE, FAILED, UNAVAILABLE, REVIEW, HANDED)
+REMOVED = "removed"  # taken out of the queue by hand; can be restored
+STATES = (PENDING, DONE, FAILED, UNAVAILABLE, REVIEW, HANDED, REMOVED)
 
 
 def data_dir() -> Path:
@@ -64,7 +68,12 @@ class Queue:
                       r[8] or "", r[9], r[10]) for r in rows]
 
     def all(self) -> list[Entry]:
-        return self._entries()
+        """Every entry but the removed ones."""
+        return self._entries("WHERE status != ?", (REMOVED,))
+
+    def removed(self) -> list[Entry]:
+        """Entries taken out of the queue, most recently removed first."""
+        return sorted(self._entries("WHERE status = ?", (REMOVED,)), key=lambda e: e.finished or 0, reverse=True)
 
     def pending(self) -> list[Entry]:
         return self._entries("WHERE status = ?", (PENDING,))
@@ -101,10 +110,26 @@ class Queue:
         return bool(self.db.execute("SELECT 1 FROM queue WHERE identifier = ? AND status = ?",
                                     (identifier, PENDING)).fetchone())
 
-    def remove(self, identifier: str) -> int:
+    def remove(self, identifier: str, when: float | None = None) -> int:
+        """Take a waiting item out of the queue (restore puts it back)."""
         with self.db:
-            return self.db.execute("DELETE FROM queue WHERE identifier = ? AND status = ?",
-                                   (identifier, PENDING)).rowcount
+            return self.db.execute("UPDATE queue SET status = ?, finished = ? WHERE identifier = ? AND status = ?",
+                                   (REMOVED, when or time.time(), identifier, PENDING)).rowcount
+
+    def restore(self, identifiers: list[str] | None = None) -> list[Entry]:
+        """Put removed items back where they were in the queue: these, or (None) the last removal, which may
+        be a whole clear. What was put back."""
+        gone = self.removed()
+        if identifiers is None:
+            last = gone[0].finished if gone else None
+            back = [e for e in gone if e.finished == last]
+        else:
+            wanted = set(identifiers)
+            back = [e for e in gone if e.identifier in wanted]
+        with self.db:
+            for e in back:
+                self.db.execute("UPDATE queue SET status = ?, finished = NULL WHERE id = ?", (PENDING, e.id))
+        return sorted(back, key=lambda e: (e.added, e.id))
 
     def retry(self, identifiers: list[str] | None = None) -> int:
         """Queue failed entries again, at the end."""
@@ -141,5 +166,7 @@ class Queue:
         return True
 
     def clear(self) -> int:
+        """Take everything waiting out of the queue, as one removal (restore puts it all back)."""
         with self.db:
-            return self.db.execute("DELETE FROM queue WHERE status = ?", (PENDING,)).rowcount
+            return self.db.execute("UPDATE queue SET status = ?, finished = ? WHERE status = ?",
+                                   (REMOVED, time.time(), PENDING)).rowcount

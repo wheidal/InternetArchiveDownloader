@@ -42,6 +42,8 @@ iafetch picks --year 1920-1929 --queue        # ... and queue them
 iafetch picks --country France --year 1895-1930   # by country of origin
 iafetch queue list
 iafetch queue remove --from unwanted.txt         # many at once: one identifier a line
+iafetch queue removed                         # what was taken out; queue restore <id> or --last puts it back
+iafetch queue export queue.json               # save the queue; queue import queue.json (or a list of identifiers) brings it back
 iafetch start                                 # download the queue in the background (iafetch get runs it here instead)
 iafetch status                                # what it's doing
 iafetch stop                                  # pause it (--after-current: finish the item it's on first); start resumes

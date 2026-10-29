@@ -48,6 +48,29 @@ class QueueTest(unittest.TestCase):
             q.retry()
             self.assertEqual(order(), "decafb")  # a retry goes to the end
 
+    def test_removing_can_be_undone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            q = Queue(Path(tmp) / "q.db")
+            for i in "abcd":
+                q.add(Entry(i))
+            q.set("a", DONE)
+            order = lambda: "".join(e.identifier for e in q.pending())  # noqa: E731
+            self.assertEqual(q.remove("c", when=1.0), 1)
+            self.assertEqual(order(), "bd")
+            self.assertEqual(q.clear(), 2)
+            self.assertEqual(order(), "")
+            self.assertEqual([e.identifier for e in q.removed()], ["b", "d", "c"])  # the clear was last
+            self.assertNotIn("b", [e.identifier for e in q.all()])  # removed ones are out of everything else
+            self.assertEqual([e.identifier for e in q.restore()], ["b", "d"])  # the last removal: the clear
+            self.assertEqual(order(), "bd")
+            q.restore(["c"])
+            self.assertEqual(order(), "bcd")  # back where it was
+            self.assertEqual(q.restore(), [])
+            self.assertEqual(q.get("a").status, DONE)  # done items aren't touched
+            q.remove("b")
+            self.assertTrue(q.add(Entry("b")))  # queuing a removed item again is fine
+            self.assertEqual(q.removed(), [])
+
     def test_two_queues_share_one_file(self):  # a queue add while get runs
         with tempfile.TemporaryDirectory() as tmp:
             q1, q2 = Queue(Path(tmp) / "q.db"), Queue(Path(tmp) / "q.db")

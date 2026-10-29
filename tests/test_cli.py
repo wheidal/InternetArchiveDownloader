@@ -213,6 +213,40 @@ class CliTest(CliBase):
         self.assertEqual([e.identifier for e in Queue().pending()], ["noyear"])
         self.assertEqual(Queue().get("film").status, "done")
 
+    def test_clear_then_restore(self):
+        self.run_cli("queue", "add", "film", "gd77")
+        code, out = self.run_cli("queue", "clear")
+        self.assertIn("Undo: iafetch queue restore --last", out)
+        code, out = self.run_cli("queue", "removed")
+        self.assertIn("2 removed", out)
+        code, out = self.run_cli("queue", "restore", "--last")
+        self.assertIn("Put back 2", out)
+        self.assertEqual([e.identifier for e in Queue().pending()], ["film", "gd77"])
+
+    def test_export_and_import(self):
+        self.run_cli("queue", "add", "film", "--format", "h.264")
+        self.run_cli("queue", "add", "gd77")
+        export = self.root.parent / "queue.json"
+        code, out = self.run_cli("queue", "export", str(export))
+        self.assertIn("Wrote 2 item(s)", out)
+        data = json.loads(export.read_text())
+        self.assertEqual(data["entries"][0]["options"], {"formats": ["h.264"]})
+        self.run_cli("queue", "clear")
+        code, out = self.run_cli("queue", "import", str(export))
+        self.assertIn("2 added", out)
+        self.assertEqual([(e.identifier, e.options) for e in Queue().pending()],
+                         [("film", {"formats": ["h.264"]}), ("gd77", {})])
+        code, out = self.run_cli("queue", "import", str(export))
+        self.assertIn("0 added; 2 skipped", out)  # already queued
+        listing = self.root.parent / "ids.txt"
+        listing.write_text("# a plain list\nhttps://archive.org/details/lent\nfilm\n")
+        code, out = self.run_cli("queue", "import", str(listing))
+        self.assertIn("lent: not queued", out)  # restrictions are checked again
+        bad = self.root.parent / "bad.json"
+        bad.write_text('{"format": "something else"}')
+        code, out = self.run_cli("queue", "import", str(bad))
+        self.assertEqual(code, 1)
+
     def test_a_removed_item_becomes_unavailable(self):
         self.run_cli("queue", "add", "film")
         del self.fake.items["film"]
