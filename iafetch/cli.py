@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -27,6 +28,7 @@ from .select import junk, size_of
 
 EXIT_OK, EXIT_ERROR = 0, 1
 LARGE_BYTES, LARGE_ITEMS = 500 * 1024 ** 3, 10_000  # R19
+DASHBOARD_PORT = 8643  # deadfetch's dashboard is on 8642, so both can run at once
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
     pk.add_argument("--refresh", action="store_true", help="read Wikidata's and IMDb's lists again")
 
     sub.add_parser("status", help="what a running get is doing")
+
+    dash = sub.add_parser("dashboard", help="a live page of the downloads, in a browser on this computer")
+    dash.add_argument("--port", type=int, default=DASHBOARD_PORT, help=f"(default {DASHBOARD_PORT})")
+    dash.add_argument("--lan", action="store_true", help="open it to the home network, not only this computer")
+    dash.add_argument("--html", metavar="FILE", type=Path, help="write a snapshot page instead (it doesn't refresh)")
     sub.add_parser("terms", help="read the Internet Archive's terms notice and acknowledge it")
 
     args = parser.parse_args(argv)
@@ -385,7 +392,7 @@ def cmd_get(args, config) -> int:
     say = _say
     archive = _archive(config, log=say)
     throttle = Throttle(rate)
-    progress = Progress(len(pending), rate)
+    progress = Progress(len(pending), sum(e.size for e in pending), rate)
     progress.write(force=True)
     before = _stop_on_signals()
     results: dict[str, list[str]] = {k: [] for k in (DONE, REVIEW, HANDED, UNAVAILABLE, FAILED)}
@@ -396,19 +403,20 @@ def cmd_get(args, config) -> int:
         while True:
             if not pending and not args.limit:  # items queued while this ran join the end of it
                 pending = [x for x in queue.pending() if x.identifier not in tried]
-                progress.s["items"] += len(pending)
+                progress.grow(len(pending), sum(x.size for x in pending))
             if not pending:
                 break
             e = pending.pop(0)
             tried.add(e.identifier)
             n += 1
             if not queue.still_pending(e.identifier):
+                progress.grow(-1, -e.size)
                 continue  # removed from the queue while this ran
             if budget is not None and used + e.size > budget and used:
                 say(f"Stopping: the next item would pass --max-size {args.max_size}.")
                 break
             say(f"\n== {e.identifier} ({_size(e.size)})")
-            progress.item(n, e.identifier)
+            progress.item(n, e.identifier, e.size, e.title)
             status, detail, got = _get_one(e, config, archive, inbox, throttle, progress, args.no_process, say)
             used += got
             queue.set(e.identifier, status, detail if status != DONE else "", detail if status == DONE else "")
@@ -586,6 +594,38 @@ def _years(text: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2) or m.group(1))
 
 
+# --- dashboard ----------------------------------------------------------------------------------------
+
+def cmd_dashboard(args, config) -> int:
+    from . import dashboard as dashboard_mod
+    dash = dashboard_mod.Dashboard(config)
+    if args.html:
+        dash.refresh_library()
+        path = args.html.expanduser()
+        path.write_text(dashboard_mod.page(dash.snapshot(), live=False), encoding="utf-8")
+        print(f"Wrote the downloads page: {path}")
+        return EXIT_OK
+    host = "0.0.0.0" if args.lan else "127.0.0.1"
+    try:
+        server = dash.server(host, args.port)
+    except OSError as exc:
+        return _fail(f"can't serve on port {args.port}: {exc.strerror or exc}. Is a dashboard already running? "
+                     "Pick another port with --port")
+    dash.keep_library_fresh()
+    where = f"http://{socket.gethostname()}:{args.port}  (on the home network)" if args.lan else \
+        f"http://localhost:{args.port}"
+    print(f"The downloads dashboard is at {where}\nIt refreshes itself every {dashboard_mod.REFRESH} s. "
+          "Ctrl-C stops it (downloads carry on).", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nDashboard stopped.")
+    finally:
+        dash.stop()
+        server.server_close()
+    return EXIT_OK
+
+
 # --- status, terms ----------------------------------------------------------------------------------
 
 def cmd_status(args, config) -> int:
@@ -702,4 +742,4 @@ def _clock(t: float) -> str:
 
 
 COMMANDS = {"search": cmd_search, "show": cmd_show, "picks": cmd_picks, "queue": cmd_queue, "get": cmd_get, "process": cmd_process,
-            "status": cmd_status, "terms": cmd_terms}
+            "status": cmd_status, "terms": cmd_terms, "dashboard": cmd_dashboard}

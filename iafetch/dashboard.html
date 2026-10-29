@@ -1,0 +1,326 @@
+<title>Archive Downloads</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one working column, as deadfetch's: the run's state, what needs you, the library, then tabbed tables. */
+:root {
+  --bg: #f6f6fb; --panel: #ffffff; --fg: #1d1b2e; --muted: #6a6783; --line: #e2e0ee;
+  --accent: #0e7c86; --accent-soft: #dcf1f2; --blue: #2e4fa8; --blue-soft: #e4eafa;
+  --have: #237a4b; --have-soft: #dff2e6; --queued: #9a6a00; --queued-soft: #faefd2;
+  --stream: #9b98b3; --bar: #c9cde9; --bar-have: #237a4b;
+  --display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #13121c; --panel: #1b1a27; --fg: #ebe9f5; --muted: #9c99b5; --line: #2c2a3d;
+  --accent: #5cd0d8; --accent-soft: #12333a; --blue: #8fa8f0; --blue-soft: #1f2744;
+  --have: #6fd39b; --have-soft: #183526; --queued: #e8bd52; --queued-soft: #362c12;
+  --stream: #6a6783; --bar: #3a3d5e; --bar-have: #6fd39b; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #13121c; --panel: #1b1a27; --fg: #ebe9f5; --muted: #9c99b5; --line: #2c2a3d;
+  --accent: #5cd0d8; --accent-soft: #12333a; --blue: #8fa8f0; --blue-soft: #1f2744;
+  --have: #6fd39b; --have-soft: #183526; --queued: #e8bd52; --queued-soft: #362c12;
+  --stream: #6a6783; --bar: #3a3d5e; --bar-have: #6fd39b; color-scheme: dark }
+
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+.wrap { max-width: 1200px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 20px; }
+.wrap > * { min-width: 0; }  /* a wide table scrolls in its box instead of widening the page */
+h1 { font: 800 clamp(28px, 5vw, 44px)/1.05 var(--display); letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
+h1 span { color: var(--accent); }
+h2 { font: 600 16px var(--display); margin: 0 0 10px; }
+.lede { color: var(--muted); max-width: 70ch; margin: 6px 0 0; }
+.lede b { color: var(--fg); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: 1px; }
+.dot.live { background: var(--have); animation: pulse 2s ease-in-out infinite; }
+.dot.lost { background: var(--accent); }
+@keyframes pulse { 50% { opacity: .35; } }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 22px; font-variant-numeric: tabular-nums; }
+.stats div { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.stats div b { font: 600 20px var(--display); display: block; color: var(--fg); text-transform: none; letter-spacing: 0; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.now { display: grid; gap: 12px; }
+.now .what { font: 500 13px var(--mono); word-break: break-all; }
+.now .what a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+.now .what a:hover { color: var(--accent); border-color: var(--accent); }
+.now .sub { color: var(--muted); font-size: 13px; }
+.prog { display: grid; grid-template-columns: 7.5em 1fr auto; gap: 4px 12px; align-items: center; font-variant-numeric: tabular-nums; }
+.prog .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.prog .num { font: 12px var(--mono); color: var(--muted); text-align: right; white-space: nowrap; }
+.track { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+.track i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .6s ease; }
+.track.run i { background: var(--fg); opacity: .7; }
+.filing { font-size: 13px; }
+.filing code, .foot code, .needs code { font-family: var(--mono); font-size: 12px; }
+
+.needs { border-color: var(--queued); }
+.needs ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.needs li { display: grid; gap: 2px; }
+.needs .id { margin-top: 0; }
+.needs .why { font-size: 13px; }
+
+.years header { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.years header strong { color: var(--fg); font-weight: 600; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.strip-scroll { overflow-x: auto; }
+.strip { display: grid; grid-template-columns: repeat(31, minmax(18px, 1fr)); gap: 3px; align-items: end; height: 110px; min-width: 620px; }
+.yr { all: unset; cursor: pointer; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; border-radius: 3px; }
+.yr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.yr .f { background: var(--bar); border-radius: 2px 2px 0 0; }
+.yr .q { background: var(--queued); }
+.yr .h { background: var(--bar-have); }
+.yr.on .f { background: var(--accent); }
+.yr:hover .f { filter: brightness(0.92); }
+.ylabels { display: grid; grid-template-columns: repeat(31, minmax(18px, 1fr)); gap: 3px; min-width: 620px; font: 10px var(--mono); color: var(--muted); text-align: center; padding-top: 4px; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.seg button { all: unset; cursor: pointer; padding: 7px 12px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+input[type="search"] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); min-width: 0; flex: 1 1 220px; max-width: 340px; }
+input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+.clear { all: unset; cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 500; }
+
+.tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 860px; font-variant-numeric: tabular-nums; }
+th { position: sticky; top: 0; background: var(--panel); text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; padding: 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th.num, td.num { text-align: right; white-space: nowrap; }
+td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tr.current td { background: var(--accent-soft); }
+.rank { font: 500 13px var(--mono); color: var(--muted); }
+.date, .when { font: 500 13px var(--mono); white-space: nowrap; }
+.when { color: var(--muted); font-weight: 400; }
+.id { display: block; font: 12px var(--mono); word-break: break-all; }
+.id a { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--muted); }
+.id a:hover { color: var(--accent); border-color: var(--accent); }
+.detail { color: var(--muted); font-size: 13px; max-width: 460px; }
+.tag { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.tag.filed { background: var(--have-soft); color: var(--have); }
+.tag.review, .tag.waiting { background: var(--queued-soft); color: var(--queued); }
+.tag.failed, .tag.now { background: var(--accent-soft); color: var(--accent); }
+.tag.extra { background: transparent; color: var(--muted); border: 1px dashed var(--line); font-weight: 500; }
+.tag.there { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+.more { display: flex; justify-content: center; padding: 14px; }
+.more[hidden] { display: none; }
+.more button { all: unset; cursor: pointer; padding: 8px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-weight: 500; }
+.more button:focus-visible { outline: 2px solid var(--accent); }
+.foot { color: var(--muted); font-size: 12px; max-width: 80ch; }
+@media (max-width: 640px) { .count { margin-left: 0; width: 100%; } .prog { grid-template-columns: 5.5em 1fr; } .prog .num { grid-column: 2; text-align: left; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+.nowgrid { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: start; }
+.thumb { width: 72px; height: 72px; border-radius: 8px; object-fit: cover; background: var(--line); display: block; }
+.thumb.small { width: 40px; height: 40px; border-radius: 6px; }
+.title { font-weight: 600; }
+.lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.lib .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.lib .card b { font: 600 20px var(--display); display: block; }
+.lib .card span { color: var(--muted); font-size: 12px; }
+#lib header { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+#lib header strong { color: var(--fg); font-weight: 600; }
+.disk { margin-top: 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; font-size: 12px; color: var(--muted); }
+@media (max-width: 640px) { table { min-width: 0; } .hide-sm { display: none; } .detail { max-width: none; } }
+.tag.video { background: var(--blue-soft); color: var(--blue); }
+.tag.books { background: var(--queued-soft); color: var(--queued); }
+.tag.games { background: var(--have-soft); color: var(--have); }
+.tag.audio, .tag.images, .tag.data, .tag.other { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+.tag.handed { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 500; }
+.tag.unavailable { background: transparent; color: var(--muted); border: 1px dashed var(--line); font-weight: 500; }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Internet Archive <span>downloads</span></h1>
+    <p class="lede" id="lede"></p>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <section class="panel now" id="now" aria-label="Now"></section>
+
+  <section class="panel needs" id="needs" aria-label="Needs you" hidden></section>
+
+  <section class="panel" id="lib" aria-label="Library" hidden></section>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Table" id="tabs">
+      <button data-t="queue" aria-pressed="true">Queue</button><button data-t="history" aria-pressed="false">Filed</button><button data-t="failed" aria-pressed="false">Failed</button>
+    </div>
+    <div class="seg" role="group" aria-label="Kind" id="kinds"></div>
+    <input type="search" id="q" placeholder="Title or identifier" aria-label="Search title or identifier">
+    <span class="count" id="count"></span>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead id="head"></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="more" id="more" hidden><button id="morebtn">Show more</button></div>
+  </div>
+
+  <p class="foot" id="foot"></p>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const LIVE = __LIVE__, REFRESH = __REFRESH__;
+let D = JSON.parse(document.getElementById("data").textContent);
+let lastOk = Date.now(), lost = false;
+const st = { tab: "queue", kind: "", q: "", shown: 200 };
+try { const s = JSON.parse(localStorage.getItem("iadl") || "{}"); if (s.tab) st.tab = s.tab; if (s.kind) st.kind = s.kind; } catch (e) {}
+const save = () => { try { localStorage.setItem("iadl", JSON.stringify({ tab: st.tab, kind: st.kind })); } catch (e) {} };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const size = (n) => !n ? "0 MB" : n >= 1099511627776 ? (n / 1099511627776).toFixed(2) + " TB" : n >= 1073741824 ? (n / 1073741824).toFixed(1) + " GB" : n >= 1048576 ? Math.round(n / 1048576) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const pct = (a, b) => b ? Math.min(100, a * 100 / b) : 0;
+const link = (id) => `<a href="https://archive.org/details/${encodeURIComponent(id)}" target="_blank" rel="noopener">${esc(id)}</a>`;
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function when(t) {  // seconds since 1970 -> "16:41" today, else "Oct 25 16:41"
+  if (!t) return "";
+  const d = new Date(t * 1000), today = new Date();
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === today.toDateString() ? hm : d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + hm;
+}
+// The archive.org thumbnail of an item; a filed item's own cover when this page is served live
+const thumb = (id, local, cls) => `<img class="thumb ${cls || ""}" loading="lazy" alt="" src="${LIVE && local ? "cover/" + encodeURIComponent(id) : "https://archive.org/services/img/" + encodeURIComponent(id)}" onerror="this.style.visibility='hidden'">`;
+const KIND = { video: "Video", books: "Books", games: "Games", audio: "Audio", images: "Images", data: "Data", other: "Other" };
+const STATE = { starting: "Starting", downloading: "Downloading", between: "Between items" };
+
+function renderTop() {
+  const s = D.status, waiting = D.queue.filter((e) => !e.now);
+  let lede;
+  if (!LIVE) lede = `Snapshot of ${new Date(D.at * 1000).toLocaleString()}.`;
+  else if (lost) lede = `<span class="dot lost"></span><b>Can't reach the dashboard.</b> Is <code>iafetch dashboard</code> still running? Last news at ${clock(lastOk / 1000)}.`;
+  else if (s && s.running) lede = `<span class="dot live"></span><b>${STATE[s.state] || s.state}</b>, item ${s.item} of ${s.items}, ` +
+    `${s.rate ? "capped at " + size(s.rate) + "/s" : "no rate cap"}, started ${clock(s.started)}. Updated ${clock(D.at)}.`;
+  else if (s) lede = `<span class="dot"></span><b>No download running.</b> The last run ${s.state === "finished" ? "ended" : s.state === "stopped" ? "was stopped" : "stopped without finishing"} at ${clock(s.updated)}. Updated ${clock(D.at)}.`;
+  else lede = `<span class="dot"></span><b>No download has run yet.</b> Start one with <code>iafetch get --background</code>.`;
+  $("lede").innerHTML = lede;
+
+  const stats = [];
+  if (s) {
+    if (s.total) stats.push([`${size(s.done)} <small style="font-size:13px;color:var(--muted)">of ${size(s.total)}</small>`, "this run"]);
+    else stats.push([size(s.bytes), "downloaded this run"]);
+    if (s.running && s.speed && s.state === "downloading") stats.push([size(s.speed) + "/s", "speed"]);
+    if (s.running && s.left) stats.push([esc(s.left.replace(/^about /, "").replace(/ left$/, "")), "left"]);
+    stats.push([s.got, "done"], [s.failed, "failed"]);
+  }
+  stats.push([waiting.length.toLocaleString(), `waiting · ${size(waiting.reduce((a, e) => a + e.size, 0))}`]);
+  const lib = D.library && !D.library.error ? D.library : null;
+  if (lib) stats.push([lib.folders.reduce((a, f) => a + f.items, 0).toLocaleString(), "in the library"]);
+  $("stats").innerHTML = stats.map(([b, l]) => `<div><b>${b}</b>${l}</div>`).join("");
+
+  const now = $("now");
+  if (s && s.running && s.identifier) {
+    const bars = [];
+    if (s.state === "downloading" && s.name) bars.push(["File", `${s.file} of ${s.files}`, pct(s.file_done, s.file_size), s.file_size ? `${pct(s.file_done, s.file_size).toFixed(0)}% of ${size(s.file_size)}` : size(s.file_done), ""]);
+    if (s.item_size) bars.push(["This item", "", pct(s.item_done, s.item_size), `${size(s.item_done)} of ${size(s.item_size)}`, ""]);
+    if (s.total) bars.push(["Whole run", "", pct(s.done, s.total), `${pct(s.done, s.total).toFixed(0)}%`, "run"]);
+    now.innerHTML = `<div class="nowgrid">${thumb(s.identifier, false)}<div><h2>Now</h2>
+      ${s.title ? `<div class="title">${esc(s.title)}</div>` : ""}<div class="what">${link(s.identifier)}</div>
+      <div class="sub">${s.state === "downloading" && s.name ? "file " + esc(s.name) : esc(STATE[s.state] || s.state)}${s.quiet > 120 && s.state === "downloading" ? " · no news for " + Math.round(s.quiet / 60) + " min: it may be waiting on archive.org" : ""}</div></div></div>
+      <div class="prog">${bars.map(([l, x, p, n, k]) => `<span class="lbl">${l}</span><span class="track ${k}"><i style="width:${p.toFixed(1)}%"></i></span><span class="num">${x ? x + " · " : ""}${n}</span>`).join("")}</div>`;
+  } else if (s && !s.running && s.state !== "finished" && s.identifier) {
+    now.innerHTML = `<h2>Paused</h2><div class="sub">It was in the middle of <span class="id" style="display:inline">${link(s.identifier)}</span>; <code>iafetch get</code> picks up where it left off.</div>`;
+  } else {
+    now.innerHTML = `<h2>Now</h2><div class="sub">Nothing downloading. ${waiting.length ? `${waiting.length.toLocaleString()} item${waiting.length === 1 ? "" : "s"} waiting in the queue.` : "The queue is empty."}</div>`;
+  }
+
+  const needs = $("needs");
+  const items = D.needs.map((r) => `<li><span class="id">${link(r.id)}</span><span class="why"><span class="tag ${r.status === "failed" ? "failed" : "review"}">${r.status === "failed" ? "failed" : "needs review"}</span> ${esc(r.title)}: ${esc(r.why)}</span></li>`);
+  needs.hidden = !items.length;
+  needs.innerHTML = items.length ? `<h2>Needs you</h2><ul>${items.join("")}</ul>` +
+    `<p class="foot" style="margin:10px 0 0">${D.needs.some((r) => r.status === "review") ? "Edit the plan in the inbox, set <code>\"approved\": true</code>, then <code>iafetch process &lt;plan&gt;</code>. " : ""}${D.needs.some((r) => r.status === "failed") ? "Queue failed downloads again with <code>iafetch queue retry</code>." : ""}</p>` : "";
+}
+
+function renderLibrary() {
+  const lib = D.library, box = $("lib");
+  box.hidden = !lib;
+  if (!lib) return;
+  if (lib.error) { box.innerHTML = `<header><span><strong>Library</strong></span></header><div class="sub">${esc(lib.error)}</div>`; return; }
+  const used = lib.disk - lib.free;
+  box.innerHTML = `<header><span><strong>Library</strong> · ${esc(lib.root)}</span><span>counted at ${clock(lib.at)}</span></header>
+    <div class="lib">${lib.folders.length ? lib.folders.map((f) => `<div class="card"><span>${esc(f.name)}</span><b>${f.items.toLocaleString()}</b><span>${size(f.size)}</span></div>`).join("") : '<div class="sub">Nothing filed yet.</div>'}</div>
+    <div class="disk"><span class="track run"><i style="width:${pct(used, lib.disk).toFixed(1)}%"></i></span><span>${size(lib.free)} free of ${size(lib.disk)}</span></div>`;
+}
+
+const OUTCOME = { done: "filed", review: "needs review", failed: "failed", unavailable: "unavailable", handed: "to deadfetch" };
+const TABLES = {
+  queue: { head: ["#", "", "Item", "Kind", "Size"], cls: ["num", "", "", "hide-sm", "num"], rows: () => D.queue,
+    row: (e, i) => `<tr class="${e.now ? "current" : ""}"><td class="num rank">${i + 1}</td><td>${thumb(e.id, false, "small")}</td>
+      <td><span class="title">${esc(e.title)}</span>${e.now ? ' <span class="tag now" style="vertical-align:1px">downloading</span>' : ""}<span class="id">${link(e.id)}${e.manual_for ? " · manual for " + esc(e.manual_for) : ""}</span></td>
+      <td class="hide-sm"><span class="tag ${e.kind}">${KIND[e.kind] || e.kind}</span></td><td class="num">${size(e.size)}</td></tr>`,
+    empty: "The queue is empty. Queue items with <code>iafetch queue add</code> or <code>iafetch picks --queue</code>." },
+  history: { head: ["", "Finished", "Item", "Kind", "Outcome", "Folder · or why it stopped"], cls: ["", "", "", "hide-sm", "", "hide-sm"], rows: () => D.history,
+    row: (h) => `<tr><td>${thumb(h.id, h.cover, "small")}</td><td class="when">${when(h.when)}</td>
+      <td><span class="title">${esc(h.title)}</span><span class="id">${link(h.id)}</span></td><td class="hide-sm"><span class="tag ${h.kind}">${KIND[h.kind] || h.kind}</span></td>
+      <td><span class="tag ${h.status === "done" ? "filed" : h.status}">${OUTCOME[h.status] || h.status}</span></td><td class="detail hide-sm">${esc(h.folder || h.error)}</td></tr>`,
+    empty: "Nothing filed yet." },
+  failed: { head: ["Item", "Error", "Size"], cls: ["", "", "num"], rows: () => D.history.filter((h) => h.status === "failed"),
+    row: (f) => `<tr><td><span class="title">${esc(f.title)}</span><span class="id">${link(f.id)}</span></td><td class="detail">${esc(f.error)}</td><td class="num">${size(f.size)}</td></tr>`,
+    empty: "No failed downloads." },
+};
+$("tabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; st.tab = b.dataset.t; st.shown = 200; save(); renderTable(); });
+$("kinds").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; st.kind = b.dataset.k; st.shown = 200; save(); renderTable(); });
+$("q").addEventListener("input", (e) => { st.q = e.target.value.trim().toLowerCase(); st.shown = 200; renderTable(); });
+$("morebtn").onclick = () => { st.shown += 200; renderTable(); };
+
+let drawn = "";
+function renderTable() {
+  const t = TABLES[st.tab] || TABLES.queue;
+  $("tabs").querySelectorAll("button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.t === st.tab));
+    const n = TABLES[b.dataset.t].rows().length;
+    b.textContent = { queue: "Queue", history: "Filed", failed: "Failed" }[b.dataset.t] + (n ? ` (${n.toLocaleString()})` : "");
+  });
+  const all = t.rows();
+  const present = [...new Set(all.map((x) => x.kind))].filter(Boolean);
+  if (st.kind && !present.includes(st.kind)) present.push(st.kind);
+  const kinds = ["", ...Object.keys(KIND).filter((k) => present.includes(k))];
+  const kindHtml = kinds.length > 2 ? kinds.map((k) => `<button data-k="${k}" aria-pressed="${st.kind === k}">${k ? KIND[k] : "All"}</button>`).join("") : "";
+  if ($("kinds").innerHTML !== kindHtml) $("kinds").innerHTML = kindHtml;
+  $("kinds").hidden = !kindHtml;
+  const list = all.map((x, i) => [x, i]).filter(([x]) => (!st.kind || x.kind === st.kind) &&
+    (!st.q || (x.title || "").toLowerCase().includes(st.q) || x.id.toLowerCase().includes(st.q)));
+  $("count").textContent = `${list.length.toLocaleString()} of ${all.length.toLocaleString()}`;
+  const html = `<tr>${t.head.map((h, i) => `<th class="${t.cls[i]}">${h}</th>`).join("")}</tr>` + "\u0000" +
+    (list.length ? list.slice(0, st.shown).map(([x, i]) => t.row(x, i)).join("") :
+      `<tr><td colspan="${t.head.length}" style="padding:28px;text-align:center;color:var(--muted)">${all.length && (st.kind || st.q) ? 'Nothing matches. <button class="clear" id="reset">Clear the filters</button>' : t.empty}</td></tr>`);
+  if (html !== drawn) {  // redraw only on change, so a refresh doesn't disturb reading or a hover
+    const [head, body] = html.split("\u0000");
+    $("head").innerHTML = head; $("rows").innerHTML = body; drawn = html;
+    const reset = $("reset"); if (reset) reset.onclick = () => { st.q = ""; st.kind = ""; $("q").value = ""; save(); renderTable(); };
+  }
+  $("more").hidden = list.length <= st.shown;
+  $("morebtn").textContent = `Show ${Math.min(200, list.length - st.shown)} more`;
+}
+
+function renderFoot() {
+  const s = D.status, pid = s && s.running ? `kill ${s.pid}` : "kill <process>";
+  $("foot").innerHTML = `Watching only: pause the run with <code>${esc(pid)}</code> (it resumes where it stopped), start one with <code>iafetch get --background</code>. Queue more with <code>iafetch queue add</code> or <code>iafetch picks --queue</code>; take items out with <code>iafetch queue remove</code>; send failed ones round again with <code>iafetch queue retry</code>.`;
+}
+function render() { renderTop(); renderLibrary(); renderTable(); renderFoot(); }
+render();
+
+if (LIVE) {
+  async function poll() {
+    try {
+      const r = await fetch("data.json", { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status);
+      D = await r.json(); lastOk = Date.now(); lost = false;
+    } catch (e) { lost = true; }
+    render();
+    setTimeout(poll, REFRESH);
+  }
+  setTimeout(poll, REFRESH);
+}
+</script>

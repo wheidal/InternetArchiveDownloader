@@ -44,6 +44,7 @@ iafetch queue list
 iafetch queue remove --from unwanted.txt         # many at once: one identifier a line
 iafetch get                                   # or: get --background, then iafetch status
 iafetch process <identifier>                  # file an item after reviewing its plan
+iafetch dashboard                             # a live page of the downloads: http://localhost:8643 (--lan for the home network)
 ```
 
 The first `get` shows the Archive's terms notice once and asks you to acknowledge it (`iafetch terms`).

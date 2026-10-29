@@ -29,6 +29,7 @@ class Entry:
     error: str = ""
     result: str = ""  # where it was filed
     id: int = 0
+    finished: float | None = None  # when it was downloaded, filed or given up on
 
 
 class Queue:
@@ -39,6 +40,9 @@ class Queue:
         self.db.execute("""CREATE TABLE IF NOT EXISTS queue (
             id INTEGER PRIMARY KEY, identifier TEXT NOT NULL, title TEXT, size INTEGER, handler TEXT,
             options TEXT, status TEXT, added REAL, error TEXT, result TEXT)""")
+        columns = {r[1] for r in self.db.execute("PRAGMA table_info(queue)")}
+        if "finished" not in columns:  # queues made before items recorded when they ended
+            self.db.execute("ALTER TABLE queue ADD COLUMN finished REAL")
         self.db.commit()
 
     def close(self) -> None:
@@ -51,10 +55,10 @@ class Queue:
             pass
 
     def _entries(self, where: str = "", args: tuple = ()) -> list[Entry]:
-        rows = self.db.execute(f"SELECT identifier, title, size, handler, options, status, added, error, result, id "
-                               f"FROM queue {where} ORDER BY added, id", args).fetchall()
+        rows = self.db.execute(f"SELECT identifier, title, size, handler, options, status, added, error, result, id, "
+                               f"finished FROM queue {where} ORDER BY added, id", args).fetchall()
         return [Entry(r[0], r[1] or "", r[2] or 0, r[3] or "", json.loads(r[4] or "{}"), r[5], r[6], r[7] or "",
-                      r[8] or "", r[9]) for r in rows]
+                      r[8] or "", r[9], r[10]) for r in rows]
 
     def all(self) -> list[Entry]:
         return self._entries()
@@ -82,8 +86,8 @@ class Queue:
     def set(self, identifier: str, status: str, error: str = "", result: str = "") -> None:
         assert status in STATES
         with self.db:
-            self.db.execute("UPDATE queue SET status = ?, error = ?, result = ? WHERE identifier = ?",
-                            (status, error, result, identifier))
+            self.db.execute("UPDATE queue SET status = ?, error = ?, result = ?, finished = ? WHERE identifier = ?",
+                            (status, error, result, None if status == PENDING else time.time(), identifier))
 
     def set_options(self, identifier: str, options: dict) -> None:
         with self.db:
