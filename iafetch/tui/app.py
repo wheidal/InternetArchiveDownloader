@@ -460,6 +460,9 @@ class QueueScreen(Screen):
                     + (f" · {size(s.get('speed'))}/s" if s.get("speed") else "")
                     + (f" · {time_left(s)}" if time_left(s) else "")
                     + (" · stopping after this item" if control.stop_after_requested(int(s["pid"])) else ""))
+        elif control.read_resume():
+            import time as _time
+            line = f"Paused until {_time.strftime('%a %H:%M', _time.localtime(control.read_resume()['at']))}, when it starts again by itself. g starts it now."
         else:
             line = "Not downloading. g starts."
         line += (f"\n{len(entries):,} waiting, {size(sum(e.size for e in entries))}"

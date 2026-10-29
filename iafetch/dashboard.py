@@ -131,7 +131,8 @@ def snapshot(config, lib: dict | None = None, kinds: Kinds | None = None, writes
         "needs": [dict(row(e), why=e.error) for e in finished if e.status in (REVIEW, FAILED)],
         "counts": {k: sum(1 for e in entries if e.status == k) for k in (DONE, REVIEW, FAILED, UNAVAILABLE, HANDED)},
         "library": lib,
-        "control": {"writes": writes, "stop_after": bool(live and control.stop_after_requested(int(s["pid"])))},
+        "control": {"writes": writes, "stop_after": bool(live and control.stop_after_requested(int(s["pid"]))),
+                    "resume_at": (control.read_resume() or {}).get("at")},
     }
 
 

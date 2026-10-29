@@ -90,6 +90,12 @@ def main(argv: list[str] | None = None) -> int:
     _run_args(start)
     stop = sub.add_parser("stop", help="stop the background download; iafetch start resumes it")
     stop.add_argument("--after-current", action="store_true", help="let the item it's on finish and be filed first")
+    when = stop.add_mutually_exclusive_group()
+    when.add_argument("--for", dest="pause_for", metavar="LENGTH", help="and start again after this long: 90m, 3h, 1h30m, 2d")
+    when.add_argument("--until", dest="pause_until", metavar="TIME",
+                      help='and start again then: 22:00 (today, or tomorrow if it has passed), "tomorrow 08:00", "2026-10-30 08:00"')
+    stop.add_argument("--large-job", action="store_true", help="when it starts again, go ahead though the queue is over "
+                      "the large-job limit")
 
     proc = sub.add_parser("process", help="file a downloaded item from the inbox (after reviewing its plan)")
     proc.add_argument("item", help=f"identifier, or its {PLAN_SUFFIX} file")
@@ -516,6 +522,7 @@ def cmd_get(args, config) -> int:
     archive = _archive(config, log=say)
     throttle = Throttle(rate)
     progress = Progress(len(pending), sum(e.size for e in pending), rate)
+    progress.s["argv"] = ["get"] + _run_argv(args)  # what a pause (stop --for/--until) starts it again with
     progress.write(force=True)
     before = _stop_on_signals()
     results: dict[str, list[str]] = {k: [] for k in (DONE, REVIEW, HANDED, UNAVAILABLE, FAILED)}
@@ -816,9 +823,8 @@ def cmd_tui(args, config) -> int:
 def cmd_status(args, config) -> int:
     s = read_status()
     if not s:
-        print("No download has run yet. Start one with: iafetch get")
-        return EXIT_OK
-    if running(s):
+        print("No download has run yet. Start one with: iafetch start")
+    elif running(s):
         cap = f", capped at {_size(s['rate'])}/s" if s.get("rate") else ", no rate cap"
         print(f"iafetch get is running (process {s['pid']}, started {_clock(s['started'])}{cap}). "
               f"Stop it with: iafetch stop")
@@ -832,6 +838,11 @@ def cmd_status(args, config) -> int:
     else:
         print(f"No get running. The last one {s.get('state', 'ended')} at {_clock(s.get('updated', 0))}: "
               f"{s.get('got', 0)} done, {s.get('failed', 0)} failed. Start one with: iafetch start")
+    plan = control.read_resume()
+    if plan:  # shown whether or not a download has run before
+        from datetime import datetime
+        print(f"Paused: it starts again {_when(datetime.fromtimestamp(plan['at']))}"
+              + (f" (with {' '.join(plan['options'])})" if plan.get("options") else "") + ". iafetch start starts it now.")
     print(f"{len(Queue().pending())} waiting in the queue.")
     return EXIT_OK
 
@@ -866,14 +877,19 @@ def _ask_terms(config) -> bool:
 
 # --- helpers -----------------------------------------------------------------------------------------
 
-def _start_background(args) -> int:
-    argv = ["get"]
+def _run_argv(args) -> list[str]:
+    """A run's options, as they'd be typed: --rate 2M --large-job…"""
+    argv = []
     for flag, value in (("--limit", args.limit), ("--max-size", args.max_size), ("--rate", args.rate)):
         if value is not None:
             argv += [flag, str(value)]
     argv += ["--no-process"] if args.no_process else []
     argv += ["--large-job"] if args.large_job else []
-    pid = control.start_background(argv)
+    return argv
+
+
+def _start_background(args) -> int:
+    pid = control.start_background(["get"] + _run_argv(args))
     print(f"Downloading in the background (process {pid}).\n"
           f"  progress:  iafetch status, or iafetch dashboard\n  the log:   tail -f {log_path()}\n"
           f"  pause:     iafetch stop   (or --after-current); iafetch start picks up where it stopped")
@@ -882,13 +898,40 @@ def _start_background(args) -> int:
 
 def cmd_start(args, config) -> int:
     args.background, args.dry_run = True, False
+    if control.cancel_resume():
+        print("(The planned restart is cancelled: starting now.)")
     return cmd_get(args, config)
 
 
 def cmd_stop(args, config) -> int:
+    when = None
+    if args.pause_for or args.pause_until:
+        when = control.parse_when(args.pause_for or args.pause_until, duration=bool(args.pause_for))
+    status = read_status()
     ok, message = control.stop(after_current=args.after_current)
     print(message)
-    return EXIT_OK if ok else EXIT_ERROR
+    if when is None:
+        return EXIT_OK if ok else EXIT_ERROR
+    if not ok and not control.read_resume() and "No iafetch get is running" not in message:
+        return EXIT_ERROR
+    options = control.run_options(status)
+    if args.large_job and "--large-job" not in options:
+        options.append("--large-job")
+    control.schedule_resume(when, options)
+    print(f"It will start again {_when(when)}" + (f" (with {' '.join(options)})" if options else "") +
+          ". Start it sooner with iafetch start; that cancels the plan.")
+    return EXIT_OK
+
+
+def _when(at) -> str:
+    """ "at 22:00", "tomorrow at 08:00", "on Fri 30 Oct at 08:00" """
+    from datetime import datetime, timedelta
+    today = datetime.now().date()
+    if at.date() == today:
+        return f"at {at:%H:%M}"
+    if at.date() == today + timedelta(days=1):
+        return f"tomorrow at {at:%H:%M}"
+    return f"on {at:%a %d %b} at {at:%H:%M}"
 
 
 def _stop_on_signals() -> dict:

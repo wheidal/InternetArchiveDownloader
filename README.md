@@ -48,6 +48,7 @@ iafetch queue export queue.json               # save the queue; queue import que
 iafetch start                                 # download the queue in the background (iafetch get runs it here instead)
 iafetch status                                # what it's doing
 iafetch stop                                  # pause it (--after-current: finish the item it's on first); start resumes
+iafetch stop --until 22:00                    # pause until then (or --for 3h); it starts again by itself
 iafetch process <identifier>                  # file an item after reviewing its plan
 iafetch dashboard                             # a live page of the downloads: http://localhost:8643 (--lan for the home network)
 iafetch tui                                   # the terminal UI: search, filter, tick and queue; reorder the queue

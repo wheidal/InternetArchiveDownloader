@@ -112,3 +112,62 @@ class DashboardButtonsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PauseTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.dict(os.environ, {"XDG_DATA_HOME": tmp.name})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_when(self):
+        from datetime import datetime
+        now = datetime(2026, 10, 29, 23, 0)
+        cases = {("3h", True): datetime(2026, 10, 30, 2, 0), ("1h30m", True): datetime(2026, 10, 30, 0, 30),
+                 ("90 min", True): datetime(2026, 10, 30, 0, 30), ("2d", True): datetime(2026, 10, 31, 23, 0),
+                 ("22:00", False): datetime(2026, 10, 30, 22, 0),  # passed today: tomorrow's
+                 ("23:30", False): datetime(2026, 10, 29, 23, 30),
+                 ("tomorrow 08:00", False): datetime(2026, 10, 30, 8, 0),
+                 ("2026-11-01 08:00", False): datetime(2026, 11, 1, 8, 0)}
+        for (text, duration), want in cases.items():
+            self.assertEqual(control.parse_when(text, now, duration=duration), want, text)
+        for text, duration in (("soon", True), ("3 weeks", True), ("10pm", False), ("2026-10-01 08:00", False)):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                control.parse_when(text, now, duration=duration)
+
+    def test_the_waiter_starts_it_again_on_time(self):
+        from datetime import datetime
+        spawned, started = [], []
+        plan = control.schedule_resume(datetime.fromtimestamp(1000.0), ["--rate", "2M"], spawn=spawned.append)
+        self.assertEqual(spawned, [plan["token"]])
+        t = [400.0]
+        result = control.wait_and_resume(plan["token"], clock=lambda: t[0], sleep=lambda s: t.__setitem__(0, t[0] + s),
+                                         starter=lambda opts: (started.append(opts), (True, "Downloading."))[1], say=lambda m: None)
+        self.assertEqual((result, started, t[0]), ("started", [["--rate", "2M"]], 1000.0))
+        self.assertIsNone(control.read_resume())  # used up
+
+    def test_a_cancelled_or_replaced_plan_ends_the_waiter(self):
+        from datetime import datetime
+        old = control.schedule_resume(datetime.fromtimestamp(1000.0), [], spawn=lambda token: None)
+        control.schedule_resume(datetime.fromtimestamp(2000.0), [], spawn=lambda token: None)  # a new stop --until
+        self.assertEqual(control.wait_and_resume(old["token"], clock=lambda: 0.0, sleep=lambda s: None), "cancelled")
+        self.assertTrue(control.cancel_resume())  # iafetch start by hand
+        self.assertFalse(control.cancel_resume())
+
+    def test_run_options(self):
+        self.assertEqual(control.run_options({"argv": ["get", "--rate", "2M", "--large-job"]}), ["--rate", "2M", "--large-job"])
+        self.assertEqual(control.run_options(None), [])
+
+    def test_stop_until_with_nothing_running_still_plans_a_start(self):
+        import contextlib
+        import io
+        from iafetch import cli
+        out = io.StringIO()
+        with mock.patch.object(control, "_spawn_waiter", lambda token: 1), contextlib.redirect_stdout(out), \
+                mock.patch.dict(os.environ, {"IAFETCH_CONFIG": "/nonexistent.toml"}):
+            code = cli.main(["stop", "--for", "2h", "--large-job"])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertIn("It will start again", out.getvalue())
+        self.assertEqual(control.read_resume()["options"], ["--large-job"])

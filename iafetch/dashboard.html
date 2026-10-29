@@ -212,6 +212,7 @@ function renderTop() {
   else if (lost) lede = `<span class="dot lost"></span><b>Can't reach the dashboard.</b> Is <code>iafetch dashboard</code> still running? Last news at ${clock(lastOk / 1000)}.`;
   else if (s && s.running) lede = `<span class="dot live"></span><b>${STATE[s.state] || s.state}</b>, item ${s.item} of ${s.items}, ` +
     `${s.rate ? "capped at " + size(s.rate) + "/s" : "no rate cap"}, started ${clock(s.started)}. Updated ${clock(D.at)}.`;
+  else if (s && D.control && D.control.resume_at) lede = `<span class="dot"></span><b>Paused</b> until ${when(D.control.resume_at)}, when it starts again by itself. Updated ${clock(D.at)}.`;
   else if (s) lede = `<span class="dot"></span><b>No download running.</b> The last run ${s.state === "finished" ? "ended" : s.state === "stopped" ? "was stopped" : "stopped without finishing"} at ${clock(s.updated)}. Updated ${clock(D.at)}.`;
   else lede = `<span class="dot"></span><b>No download has run yet.</b> Start one with <code>iafetch start</code>.`;
   $("lede").innerHTML = lede;
@@ -240,7 +241,7 @@ function renderTop() {
       <div class="sub">${s.state === "downloading" && s.name ? "file " + esc(s.name) : esc(STATE[s.state] || s.state)}${s.quiet > 120 && s.state === "downloading" ? " · no news for " + Math.round(s.quiet / 60) + " min: it may be waiting on archive.org" : ""}</div></div></div>${actions(true)}</div>
       <div class="prog">${bars.map(([l, x, p, n, k]) => `<span class="lbl">${l}</span><span class="track ${k}"><i style="width:${p.toFixed(1)}%"></i></span><span class="num">${x ? x + " · " : ""}${n}</span>`).join("")}</div>`);
   } else if (s && !s.running && s.state !== "finished" && s.identifier) {
-    setNow(`<div class="nowhead"><div><h2>Paused</h2><div class="sub">It was in the middle of <span class="id" style="display:inline">${link(s.identifier)}</span>; <code>iafetch start</code> picks up where it left off.</div></div>${actions(false)}</div>`);
+    setNow(`<div class="nowhead"><div><h2>Paused</h2><div class="sub">It was in the middle of <span class="id" style="display:inline">${link(s.identifier)}</span>; ${D.control && D.control.resume_at ? `it starts again by itself at ${when(D.control.resume_at)}, or` : ""} <code>iafetch start</code> picks up where it left off.</div></div>${actions(false)}</div>`);
   } else {
     setNow(`<div class="nowhead"><div><h2>Now</h2><div class="sub">Nothing downloading. ${waiting.length ? `${waiting.length.toLocaleString()} item${waiting.length === 1 ? "" : "s"} waiting in the queue.` : "The queue is empty."}</div></div>${waiting.length ? actions(false) : ""}</div>`);
   }
