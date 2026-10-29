@@ -58,6 +58,10 @@ class Handler:
         named formats, which are taken as asked."""
         return selection
 
+    def choose_episodes(self, item, selection, options: dict):
+        """--episodes and --years: for handlers whose items are series of episodes."""
+        raise ValueError(f"--episodes and --years work for radio series, not {self.name} items (use --glob)")
+
     def plan(self, item, staged: Path, selection, config) -> Plan:
         raise NotImplementedError
 

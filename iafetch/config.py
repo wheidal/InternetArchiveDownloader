@@ -42,7 +42,8 @@ LIBRARY = {
     "games": "Games", "images": "Images", "data": "Data", "other": "Other",
 }
 HANDLERS = {"GratefulDead": "deadtag", "librivoxaudio": "audiobook", "audio_bookspoetry": "audiobook",
-            "audiolibrary": "audiobook", "gutenberg-audiobooks": "audiobook", "audio_poetry": "audiobook"}
+            "audiolibrary": "audiobook", "gutenberg-audiobooks": "audiobook", "audio_poetry": "audiobook",
+            "oldtimeradio": "radio", "radioprograms": "radio"}
 
 
 class ConfigError(Exception):

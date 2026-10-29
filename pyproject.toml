@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=8.0,<9"]  # iafetch tui
+audio = ["mutagen>=1.45"]  # tagging radio episodes
 
 [project.scripts]
 iafetch = "iafetch.cli:main"

@@ -160,11 +160,13 @@ def _selection_args(p) -> None:
     p.add_argument("--glob", action="append", default=[], help="only files whose names match (repeatable)")
     p.add_argument("--exclude", action="append", default=[], help="never files whose names match (repeatable)")
     p.add_argument("--all", action="store_true", help="derivatives too, not only the originals")
+    p.add_argument("--episodes", help="a radio series' episodes by number: 1-52,60")
+    p.add_argument("--years", help="a radio series' episodes by year: 1952 or 1952-1953")
 
 
 def _options(args) -> dict:
     return {k: v for k, v in (("formats", args.format), ("globs", args.glob), ("exclude", args.exclude),
-                              ("all", args.all)) if v}
+                              ("all", args.all), ("episodes", args.episodes), ("years", args.years)) if v}
 
 
 def _archive(config, log=lambda line: None) -> Archive:
