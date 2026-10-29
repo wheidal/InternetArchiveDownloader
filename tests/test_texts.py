@@ -246,3 +246,72 @@ class GutenbergTest(unittest.TestCase):
     def test_a_collection_of_files(self):
         files = [file("ACRONYMS.TXT", fmt="Text"), file("NAMES.TXT", fmt="Text"), file("mword10.zip", fmt="ZIP")]
         self.assertEqual(self.names(files), ["ACRONYMS.TXT", "NAMES.TXT"])
+
+
+class ComicTest(unittest.TestCase):
+    """The shapes of real comic items: Invincible (a run of volumes), a single manga volume."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.config = parse_config({"root": tmp.name})
+
+    def item(self, files, **meta):
+        meta = {"mediatype": "texts", "collection": ["comics_inbox", "comics"], "date": "", **meta}
+        return Item.from_json("c", item_json("c", files, **meta))
+
+    def run_of_volumes(self):
+        return [file("Invincible, Vol. 1.cbr", fmt="Comic Book RAR", size=900), file("Invincible, Vol. 1.pdf", "derivative", "Text PDF"),
+                file("Invincible, Vol. 1_jp2.zip", "derivative", "Single Page Processed JP2 ZIP"),
+                file("Invincible, Vol. 2.cbz", fmt="Comic Book ZIP", size=900), file("Invincible, Vol. 10.cbz", fmt="Comic Book ZIP", size=900)]
+
+    def test_a_run_of_volumes(self):
+        it = self.item(self.run_of_volumes(), title="Invincible [Compendiums]", creator="Robert Kirkman")
+        self.assertEqual(Texts().kind(it), "comics")
+        sel = selection(Texts(), it, {}, self.config)
+        self.assertEqual([f["name"] for f in sel.files], ["Invincible, Vol. 1.cbr", "Invincible, Vol. 2.cbz", "Invincible, Vol. 10.cbz"])
+        plan = Texts().plan(it, self.root / "x", sel, self.config)
+        self.assertEqual(plan.dest, str((self.root / "Comics" / "Invincible").resolve()))
+        self.assertIn(["Invincible, Vol. 10.cbz", "Invincible, Vol. 10.cbz"], plan.moves)
+
+    def test_the_pdf_when_asked_or_when_theres_nothing_else(self):
+        it = self.item(self.run_of_volumes(), title="Invincible")
+        pdf = parse_config({"root": str(self.root), "comics": {"format": "pdf"}})
+        self.assertEqual([f["name"] for f in selection(Texts(), it, {}, pdf).files], ["Invincible, Vol. 1.pdf"])
+        it = self.item([file("Horror.pdf", fmt="Text PDF")], title="Horror")
+        self.assertEqual([f["name"] for f in selection(Texts(), it, {}, self.config).files], ["Horror.pdf"])
+
+    def test_names(self):
+        from iafetch.handlers.texts import comic_series, comic_title
+        manga = self.item([], title="MANGA: Battle Angel Alita Volume 01", collection=["manga_library", "comics"])
+        self.assertEqual((comic_series(manga), comic_title(manga)), ("Battle Angel Alita", "Battle Angel Alita Volume 01"))
+        bone = self.item([], title="Bone - Jeff Smith", creator="Smith, Jeff")
+        self.assertEqual((comic_series(bone), comic_title(bone)), ("Bone", "Bone"))
+
+    def test_comic_numbers(self):
+        from iafetch.handlers.texts import comic_numbers
+        self.assertEqual(comic_numbers("Amazing Fantasy vol 1 15"), ("1", "15"))
+        self.assertEqual(comic_numbers("Invincible, Vol. 2"), ("", "2"))
+        self.assertEqual(comic_numbers("Batman #404"), ("", "404"))
+        self.assertEqual(comic_numbers("Bone"), ("", ""))
+
+    def test_comic_info_goes_inside_the_cbz(self):
+        import zipfile
+        from iafetch.handlers.base import Plan
+        from iafetch.handlers.texts import add_comic_info
+        dest = self.root / "Comics" / "Invincible"
+        (dest / ".iafetch" / "c").mkdir(parents=True)
+        (dest / ".iafetch" / "c" / "iafetch.json").write_text("{}")
+        with zipfile.ZipFile(dest / "Invincible, Vol. 2.cbz", "w") as z:
+            z.writestr("001.jpg", b"page")
+        (dest / "Invincible, Vol. 1.cbr").write_bytes(b"Rar!")
+        it = self.item([], title="Invincible [Compendiums]", creator="Robert Kirkman", description="<p>A teenager's powers.</p><p>Volume two.</p>")
+        plan = Plan("c", "texts", "", str(dest), moves=[["a", "Invincible, Vol. 1.cbr"], ["b", "Invincible, Vol. 2.cbz"]],
+                    sidecar=".iafetch/c/iafetch.json")
+        self.assertEqual(add_comic_info(plan, it, dest), 1)  # the CBZ only; a CBR can't be written to
+        info = zipfile.ZipFile(dest / "Invincible, Vol. 2.cbz").read("ComicInfo.xml").decode()
+        for part in ("<Series>Invincible</Series>", "<Number>2</Number>", "<Writer>Robert Kirkman</Writer>",
+                     "<Summary>A teenager's powers.\nVolume two.</Summary>", "<Web>https://archive.org/details/c</Web>"):
+            self.assertIn(part, info)
+        self.assertEqual(add_comic_info(plan, it, dest), 0)  # never twice

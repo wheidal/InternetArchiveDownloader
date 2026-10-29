@@ -22,11 +22,12 @@ The issue number comes from the item's issue field or its title, the month from 
 nothing tells one issue from another does it go to review.
 """
 
+import html
 import re
 from xml.sax.saxutils import escape
 from collections import defaultdict
 from dataclasses import replace
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from ..select import TILE, Profile, Selection, size_of
 from .base import Handler, Plan, clean, collection_title, person
@@ -44,7 +45,7 @@ class Texts(Handler):
     name = "texts"
 
     def kind(self, item) -> str:
-        return "magazines" if is_magazine(item) else "books"
+        return "comics" if is_comic(item) else "magazines" if is_magazine(item) else "books"
 
     def prepare(self, item, archive) -> None:
         if is_magazine(item) and SERIES_KEY not in item.raw:
@@ -54,6 +55,9 @@ class Texts(Handler):
         return Profile(originals=False)  # the searchable PDF is often a derivative
 
     def narrow(self, item, selection: Selection, config=None) -> Selection:
+        if is_comic(item):
+            settings = (config.settings.get("comics") if config else None) or {}
+            return replace(selection, files=comic_files(selection.files, settings.get("format", "cbz")))
         if is_gutenberg(item):
             return replace(selection, files=gutenberg_files(selection.files))
         wanted = _formats(config)
@@ -67,6 +71,8 @@ class Texts(Handler):
         return replace(selection, files=sorted(chosen, key=lambda f: f["name"]))
 
     def plan(self, item, staged, selection, config) -> Plan:
+        if is_comic(item):
+            return comic_plan(item, staged, selection, config)
         if is_magazine(item):
             return magazine_plan(item, staged, selection, config)
         title, year, author = book_title(item), item.year, author_of(item)
@@ -103,7 +109,10 @@ class Texts(Handler):
 
     def process(self, plan: Plan, item, selection, config):
         from .generic import file_plan
-        return file_plan(plan, item, selection, config, self.name)
+        dest = file_plan(plan, item, selection, config, self.name)
+        if is_comic(item):
+            add_comic_info(plan, item, Path(dest))
+        return dest
 
 
 def _formats(config) -> list[str]:
@@ -379,3 +388,119 @@ def gutenberg_files(files: list[dict]) -> list[dict]:
         if found:
             return found[:1]
     return [f for f in files if _ext(f) == ".txt"]
+
+
+
+# --- comics -------------------------------------------------------------------------------------------------
+
+COMIC_FORMATS = ("comic book zip", "comic book rar", "cbz", "cbr")
+COMIC_COLLECTIONS = {"comics", "comics_inbox", "manga_library", "manga_unsorted", "comicbooks"}
+COMIC_NOISE = re.compile(r"(?i)^(?:manga|comics?|novel|graphic novel)\s*:\s*|\s*\[(?:compendiums?|complete|digital)\]|"
+                         r"\s*\((?:comic|digital|[^)]*-empire|[^)]*scans?)\)|\s*(?:,\s*)?(?:vol(?:ume)?\.?|v)\s*\d+.*$|\s+#\d+.*$")
+VOLUME_NUMBER = re.compile(r"(?i)(?:\bvol(?:ume)?\.?\s*|\bv|#)(\d{1,4})\b")
+
+
+def is_comic(item) -> bool:
+    """A comic or manga: in archive.org's comics collections, or carrying comic-book archives (CBZ/CBR)."""
+    return bool(COMIC_COLLECTIONS.intersection(item.collections)) or any(
+        _fmt(f) in COMIC_FORMATS or _ext(f) in (".cbz", ".cbr") for f in item.files)
+
+
+def comic_files(files: list[dict], prefer: str = "cbz") -> list[dict]:
+    """The comic-book archives (CBZ/CBR) as uploaded, every volume: full quality, where archive.org's PDF is a
+    smaller copy. The PDF when there are none, or when [comics] format = "pdf"."""
+    archives = [f for f in files if (_fmt(f) in COMIC_FORMATS or _ext(f) in (".cbz", ".cbr")) and f.get("source") == "original"]
+    pdfs = [min(group, key=lambda f: PDF_FORMATS.index(_fmt(f))) for group in _documents(files, PDF_FORMATS).values()]
+    chosen = pdfs if (prefer == "pdf" and pdfs) or not archives else archives
+    return sorted(chosen, key=lambda f: _natural(f["name"]))
+
+
+def comic_series(item) -> str:
+    """ "MANGA: Battle Angel Alita Volume 01" -> "Battle Angel Alita"; "Invincible [Compendiums]" -> "Invincible";
+    "Bone - Jeff Smith" -> "Bone" (when Jeff Smith is the creator)."""
+    return clean(_without_creator(item, COMIC_NOISE.sub("", item.title).strip(" -,:"))) or clean(item.title)
+
+
+def comic_title(item) -> str:
+    """A single-volume item's file name: its title without "MANGA:" in front or the creator after a dash."""
+    return clean(_without_creator(item, re.sub(r"(?i)^(?:manga|comics?|novel|graphic novel)\s*:\s*", "", item.title)))
+
+
+def _without_creator(item, title: str) -> str:
+    m = re.match(r"^(.+?)\s+[-–—]\s+(.+)$", title)
+    creators = {re.sub(r"[^a-z]", "", person(c).lower()) for c in item.values("creator")}
+    if m and re.sub(r"[^a-z]", "", m.group(2).lower()) in creators:
+        return m.group(1)
+    return title
+
+
+def comic_plan(item, staged, selection, config) -> Plan:
+    series = comic_series(item)
+    dest = config.inside(config.folder("comics") / _short(series))
+    plan = Plan(item.identifier, "texts", str(staged), str(dest), sidecar=f".iafetch/{item.identifier}/iafetch.json")
+    for f in selection.files:
+        name = comic_title(item) if len(selection.files) == 1 else clean(PurePosixPath(f["name"]).stem)
+        name = _short(name)
+        if (dest / (name + _ext(f))).exists():  # another upload of the same volume
+            name = f"{name} [{item.identifier}]"
+        plan.moves.append([f["name"], name + _ext(f)])
+    for f in selection.record:
+        plan.moves.append([f["name"], f".iafetch/{item.identifier}/{PurePosixPath(f['name']).name}"])
+    if selection.tile:
+        plan.moves.append([TILE, "cover.jpg" if not (dest / "cover.jpg").exists() else f".iafetch/{item.identifier}/{TILE}"])
+    if not selection.files:
+        plan.review.append("no comic files (CBZ, CBR or PDF) to take (try --as generic)")
+    plan.approved = not plan.review
+    return plan
+
+
+def comic_info(item, series: str, volume_name: str) -> str:
+    """ComicInfo.xml, which Komga, Kavita and comic readers read from inside a CBZ."""
+    from xml.sax.saxutils import escape
+    volume, number = comic_numbers(volume_name) if any(comic_numbers(volume_name)) else comic_numbers(item.title)
+    summary = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"(?i)<br\s*/?>|</p>|</div>", "\n", item.field("description"))))
+    fields = [("Title", volume_name), ("Series", series), ("Number", number), ("Volume", volume),
+              ("Writer", ", ".join(person(c) for c in item.values("creator") if c.strip() and "://" not in c)),
+              ("Year", item.year), ("Summary", re.sub(r"\n{3,}", "\n\n", summary).strip()),
+              ("LanguageISO", (item.values("language") or [""])[0][:2] if item.values("language") else ""),
+              ("Web", f"https://archive.org/details/{item.identifier}")]
+    body = "".join(f"  <{k}>{escape(v)}</{k}>\n" for k, v in fields if v)
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<ComicInfo xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xmlns:xsd="http://www.w3.org/2001/XMLSchema">\n' + body + "</ComicInfo>\n")
+
+
+def comic_numbers(text: str) -> tuple[str, str]:
+    """(volume, number): "vol 1 15" -> ("1", "15"); "#15" or "No. 15" -> ("", "15"); "Vol. 2" -> ("", "2") (a
+    collected volume is numbered by its volume)."""
+    m = re.search(r"(?i)\bvol(?:ume)?\.?\s*(\d{1,4})\s*[,:]?\s*(?:#|no\.?\s*|issue\s*)?(\d{1,4})\b", text)
+    if m:
+        return str(int(m.group(1))), str(int(m.group(2)))
+    m = re.search(r"(?i)(?:#|\bno\.\s*|\bissue\s*)(\d{1,4})\b", text) or VOLUME_NUMBER.search(text)
+    return ("", str(int(m.group(1)))) if m else ("", "")
+
+
+def add_comic_info(plan: Plan, item, dest: Path) -> int:
+    """Put ComicInfo.xml into each filed CBZ that has none (a CBZ is a zip; a CBR, a RAR, can't be written to).
+    Records the changed files' MD5s. How many were written."""
+    import zipfile
+    from .. import tags
+    from ..download import safe_path
+    series, processed = comic_series(item), {}
+    for _, rel in plan.moves:
+        path = safe_path(dest, rel)
+        if path.suffix.lower() != ".cbz" or not path.is_file():
+            continue
+        try:
+            with zipfile.ZipFile(path, "a") as cbz:
+                if any(n.lower().endswith("comicinfo.xml") for n in cbz.namelist()):
+                    continue
+                cbz.writestr("ComicInfo.xml", comic_info(item, series, path.stem))
+        except (zipfile.BadZipFile, OSError):
+            continue
+        processed[rel] = tags.md5(path)
+    tags.record_processed(dest / plan.sidecar, processed)
+    return len(processed)
+
+
+def _natural(name: str) -> list:
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", name)]
